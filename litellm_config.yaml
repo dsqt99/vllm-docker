@@ -1,0 +1,28 @@
+model_list:
+  - model_name: qwen-text
+    litellm_params:
+      model: openai/Qwen/Qwen3-8B
+      api_base: http://vllm-text:8000/v1
+      api_key: "EMPTY" # vLLM default
+  
+  - model_name: qwen-vl
+    litellm_params:
+      model: openai/Qwen/Qwen3-VL-8B-Instruct
+      api_base: http://vllm-vl:8000/v1
+      api_key: "EMPTY"
+
+  # Aliases for convenience
+  - model_name: qwen-3-8b
+    litellm_params:
+      model: openai/Qwen/Qwen3-8B
+      api_base: http://vllm-text:8000/v1
+      api_key: "EMPTY"
+
+  - model_name: qwen-3-vl-8b
+    litellm_params:
+      model: openai/Qwen/Qwen3-VL-8B-Instruct
+      api_base: http://vllm-vl:8000/v1
+      api_key: "EMPTY"
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

@@ -1,0 +1,88 @@
+services:
+  vllm-text:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-text
+    runtime: nvidia
+    restart: unless-stopped
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=${TEXT_GPU_DEVICE}
+    command: >
+      --model ${TEXT_MODEL_ID}
+      --served-model-name ${TEXT_MODEL_ID}
+      --gpu-memory-utilization 0.95
+      --max-model-len 8192
+      --tensor-parallel-size 1
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - ollama_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['${TEXT_GPU_DEVICE}']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  vllm-vl:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-vl
+    runtime: nvidia
+    restart: unless-stopped
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=${VL_GPU_DEVICE}
+    command: >
+      --model ${VL_MODEL_ID}
+      --served-model-name ${VL_MODEL_ID}
+      --gpu-memory-utilization 0.95
+      --max-model-len 8192
+      --tensor-parallel-size 1
+      --trust-remote-code
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - ollama_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['${VL_GPU_DEVICE}']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: vllm-litellm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+    command: [ "--config", "/app/config.yaml", "--port", "4000", "--detailed_debug" ]
+    networks:
+      - ollama_default
+    depends_on:
+      - vllm-text
+      - vllm-vl
+
+networks:
+  ollama_default:
+    external: true
