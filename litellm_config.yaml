@@ -1,28 +1,21 @@
 model_list:
-  - model_name: qwen-text
+  - model_name: qwen-3.5-9b
+    model_info:
+      supports_function_calling: true
     litellm_params:
-      model: openai/Qwen/Qwen3-8B
-      api_base: http://vllm-text:8000/v1
-      api_key: "EMPTY" # vLLM default
-  
-  - model_name: qwen-vl
-    litellm_params:
-      model: openai/Qwen/Qwen3-VL-8B-Instruct
-      api_base: http://vllm-vl:8000/v1
+      model: openai/Qwen/Qwen3.8-27B-FP8
+      api_base: http://qwen:8000/v1
       api_key: "EMPTY"
-
-  # Aliases for convenience
-  - model_name: qwen-3-8b
-    litellm_params:
-      model: openai/Qwen/Qwen3-8B
-      api_base: http://vllm-text:8000/v1
-      api_key: "EMPTY"
-
-  - model_name: qwen-3-vl-8b
-    litellm_params:
-      model: openai/Qwen/Qwen3-VL-8B-Instruct
-      api_base: http://vllm-vl:8000/v1
-      api_key: "EMPTY"
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+          max_tool_calls: 32
+          max_tool_output_tokens: 8192
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  # Cấu hình mỗi User hoặc IP chỉ được gửi bao nhiêu requests mỗi phút (RPM - Requests Per Minute)
+  max_user_rpm: 60
+  drop_params: true

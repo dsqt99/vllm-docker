@@ -1,0 +1,67 @@
+services:
+  qwen36:
+    image: vllm/vllm-openai:nightly
+    container_name: qwen36
+    runtime: nvidia
+    env_file:
+      - .env
+    restart: unless-stopped
+    ipc: host
+    shm_size: '16g'
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=GPU-457b0f54-0926-45b5-56f0-103cb0feacbc,GPU-044afb0a-38ea-576e-3b97-f4fcd6d4ec56,GPU-6afb412f-80fa-fc33-b672-2a6770592f1f,GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+    command: >
+      --model ${MODEL_ID}
+      --served-model-name ${MODEL_ID}
+      --gpu-memory-utilization 0.85
+      --max-model-len 262144
+      --tensor-parallel-size 4
+      --host 0.0.0.0
+      --port 8000
+      --mm-encoder-tp-mode data
+      --mm-processor-cache-type shm
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - vllm_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - 'GPU-457b0f54-0926-45b5-56f0-103cb0feacbc'
+                - 'GPU-044afb0a-38ea-576e-3b97-f4fcd6d4ec56'
+                - 'GPU-6afb412f-80fa-fc33-b672-2a6770592f1f'
+                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  litellm36:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: vllm-litellm-36
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+    command: [ "--config", "/app/config.yaml", "--port", "4000", "--detailed_debug" ]
+    networks:
+      - vllm_default
+    depends_on:
+      - qwen36
+
+networks:
+  vllm_default:
