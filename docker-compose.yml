@@ -63,7 +63,7 @@ services:
     command: >
       --model tencent/HunyuanOCR
       --served-model-name tencent/HunyuanOCR
-      --gpu-memory-utilization 0.5
+      --gpu-memory-utilization 0.35
       --max-model-len 8192
       --tensor-parallel-size 1
       --enforce-eager
@@ -104,8 +104,8 @@ services:
       --model Qwen/Qwen3-Embedding-0.6B
       --served-model-name Qwen/Qwen3-Embedding-0.6B
       --runner pooling
-      --gpu-memory-utilization 0.3
-      --max-model-len 32768
+      --gpu-memory-utilization 0.11
+      --max-model-len 8192
       --tensor-parallel-size 1
       --enforce-eager
       --host 0.0.0.0
@@ -145,7 +145,7 @@ services:
       --model BAAI/bge-reranker-v2-m3
       --served-model-name BAAI/bge-reranker-v2-m3
       --runner pooling
-      --gpu-memory-utilization 0.18
+      --gpu-memory-utilization 0.08
       --max-model-len 8192
       --tensor-parallel-size 1
       --enforce-eager
@@ -181,12 +181,16 @@ services:
       - "${DECISION_PORT:-8006}:8000"
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}
     command: >
-      --model ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B}
-      --served-model-name ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B}
-      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.28}
+      --model ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4}
+      --served-model-name ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4} Qwen/Qwen3.5-9B qwen-decision decision-qwen
+      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.38}
       --max-model-len ${DECISION_MAX_MODEL_LEN:-8192}
+      --kv-cache-dtype fp8
+      --enforce-eager
       --tensor-parallel-size 1
       --enable-prefix-caching
       --logprobs-mode raw_logprobs
@@ -194,6 +198,7 @@ services:
       --port 8000
     volumes:
       - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ./patch_strategies.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/decisions/strategies.py:ro
     networks:
       - vllm_default
     deploy:

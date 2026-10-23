@@ -61,8 +61,8 @@ model_list:
     model_info:
       supports_decision: true
     litellm_params:
-      model: openai/Qwen/Qwen3.5-9B
-      api_base: http://qwen:8000/v1
+      model: openai/mssfj/Qwen3.5-9B-GPTQ-INT4
+      api_base: http://decision-qwen:8000/v1
       api_key: EMPTY
       extra_body:
         chat_template_kwargs:
@@ -71,8 +71,8 @@ model_list:
     model_info:
       supports_decision: true
     litellm_params:
-      model: openai/Qwen/Qwen3.5-9B
-      api_base: http://qwen:8000/v1
+      model: openai/mssfj/Qwen3.5-9B-GPTQ-INT4
+      api_base: http://decision-qwen:8000/v1
       api_key: EMPTY
       extra_body:
         chat_template_kwargs:
@@ -81,22 +81,22 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   pass_through_endpoints:
     - path: "/v1/decisions"
-      target: "http://qwen:8000/v1/decisions"
+      target: "http://decision-qwen:8000/v1/decisions"
       headers:
         content-type: "application/json"
       forward_headers: true
     - path: "/decisions"
-      target: "http://qwen:8000/v1/decisions"
+      target: "http://decision-qwen:8000/v1/decisions"
       headers:
         content-type: "application/json"
       forward_headers: true
     - path: "/v1/systemone"
-      target: "http://qwen:8000/v1/systemone"
+      target: "http://decision-qwen:8000/v1/systemone"
       headers:
         content-type: "application/json"
       forward_headers: true
     - path: "/systemone"
-      target: "http://qwen:8000/v1/systemone"
+      target: "http://decision-qwen:8000/v1/systemone"
       headers:
         content-type: "application/json"
       forward_headers: true

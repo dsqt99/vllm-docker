@@ -15,8 +15,7 @@ Tài liệu này hướng dẫn chi tiết cách sử dụng các API được c
 | `qwen-3.5-9b` / `Qwen/Qwen3.5-9B` | Văn bản (LLM) | Qwen3.5-9B | `8000` (nội bộ) |
 | `hunyuan-ocr` / `tencent/HunyuanOCR` | OCR & Trích xuất ảnh | Tencent HunyuanOCR | `8003` |
 | `qwen3-embedding-0.6b` / `Qwen/Qwen3-Embedding-0.6B` | Vector Embedding | Qwen3-Embedding-0.6B | `8004` |
-| `bge-reranker-v2-m3` / `BAAI/bge-reranker-v2-m3` | Reranker (Đa ngôn ngữ / Tiếng Việt) | BAAI/bge-reranker-v2-m3 | `8005` |
-| `decision-qwen` / `qwen-decision` | Structured Decisions / Classification / Routing | Qwen3.5-9B (`--logprobs-mode raw_logprobs`) | `8006` / `8000` |
+| `decision-qwen` / `qwen-decision` | Structured Decisions / Classification / Routing | Qwen3.5-9B-GPTQ-INT4 (`--logprobs-mode raw_logprobs`) | `8006` |
 
 Bạn cũng có thể lấy danh sách model trực tiếp qua API:
 ```bash
