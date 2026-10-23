@@ -2,8 +2,8 @@ import requests
 import json
 import os
 
-url = "http://localhost:4000/v1/chat/completions"
-api_key = "sk-1ca0e61277cf6d63d758b6597d27602511aa48c22b2f3936cde07406e7babeae"
+url = os.environ.get("LITELLM_URL", "http://localhost:4000/v1/chat/completions")
+api_key = os.environ.get("LITELLM_MASTER_KEY", "your-litellm-master-key")
 
 headers = {
     "Content-Type": "application/json",
@@ -11,7 +11,7 @@ headers = {
 }
 
 data = {
-    "model": "qwen-3.6-27b",
+    "model": "qwen-3.5-9b",
     "messages": [
         {"role": "user", "content": "What's the weather like in Boston today?"}
     ],

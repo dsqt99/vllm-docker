@@ -1,0 +1,6 @@
+FROM vllm/vllm-openai:nightly
+
+RUN pip install --no-cache-dir 'transformers==5.17.0'
+
+COPY patch_xdrope.py /tmp/patch_xdrope.py
+RUN python3 /tmp/patch_xdrope.py && rm /tmp/patch_xdrope.py

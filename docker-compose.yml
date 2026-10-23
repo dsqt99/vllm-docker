@@ -8,23 +8,26 @@ services:
     shm_size: '16g'
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
-      - NVIDIA_VISIBLE_DEVICES=GPU-457b0f54-0926-45b5-56f0-103cb0feacbc,GPU-6afb412f-80fa-fc33-b672-2a6770592f1f
+      - NVIDIA_VISIBLE_DEVICES=${GPU_DEVICES:-GPU-457b0f54-0926-45b5-56f0-103cb0feacbc,GPU-6afb412f-80fa-fc33-b672-2a6770592f1f}
+      - NCCL_P2P_DISABLE=1
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
     command: >
       --model ${MODEL_ID}
       --served-model-name ${MODEL_ID}
-      --gpu-memory-utilization 0.90
-      --max-model-len 32768
-      --tensor-parallel-size 2
-      --max-num-seqs 256
+      --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.92}
+      --max-model-len ${MAX_MODEL_LEN:-262144}
+      --tensor-parallel-size ${TENSOR_PARALLEL_SIZE:-2}
+      --kv-cache-dtype fp8
+      --max-num-seqs ${MAX_NUM_SEQS:-4}
       --enable-prefix-caching
-      --disable-custom-all-reduce
-      --enforce-eager
       --host 0.0.0.0
       --port 8000
       --mm-encoder-tp-mode data
       --mm-processor-cache-type shm
       --enable-auto-tool-choice
       --tool-call-parser qwen3_xml
+      --reasoning-parser qwen3
+      --logprobs-mode raw_logprobs
     volumes:
       - /home/cahy/.cache/huggingface:/root/.cache/huggingface
     networks:
@@ -45,6 +48,169 @@ services:
       retries: 5
       start_period: 120s
 
+  hunyuan-ocr:
+    image: vllm-ocr:latest
+    container_name: hunyuan-ocr
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '8g'
+    ports:
+      - "8003:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+    command: >
+      --model tencent/HunyuanOCR
+      --served-model-name tencent/HunyuanOCR
+      --gpu-memory-utilization 0.5
+      --max-model-len 8192
+      --tensor-parallel-size 1
+      --enforce-eager
+      --no-enable-prefix-caching
+      --mm-processor-cache-gb 0
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - vllm_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  qwen-embedding:
+    image: vllm/vllm-openai:nightly
+    container_name: qwen-embedding
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '4g'
+    ports:
+      - "8004:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+    command: >
+      --model Qwen/Qwen3-Embedding-0.6B
+      --served-model-name Qwen/Qwen3-Embedding-0.6B
+      --runner pooling
+      --gpu-memory-utilization 0.3
+      --max-model-len 32768
+      --tensor-parallel-size 1
+      --enforce-eager
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - vllm_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  bge-reranker:
+    image: vllm/vllm-openai:nightly
+    container_name: bge-reranker
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '4g'
+    ports:
+      - "8005:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+    command: >
+      --model BAAI/bge-reranker-v2-m3
+      --served-model-name BAAI/bge-reranker-v2-m3
+      --runner pooling
+      --gpu-memory-utilization 0.18
+      --max-model-len 8192
+      --tensor-parallel-size 1
+      --enforce-eager
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - vllm_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  decision-qwen:
+    image: vllm/vllm-openai:nightly
+    container_name: decision-qwen
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '8g'
+    ports:
+      - "${DECISION_PORT:-8006}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}
+    command: >
+      --model ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B}
+      --served-model-name ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B}
+      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.28}
+      --max-model-len ${DECISION_MAX_MODEL_LEN:-8192}
+      --tensor-parallel-size 1
+      --enable-prefix-caching
+      --logprobs-mode raw_logprobs
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - vllm_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: vllm-litellm
@@ -53,13 +219,89 @@ services:
       - "4000:4000"
     volumes:
       - ./litellm_config.yaml:/app/config.yaml
+      - ./litellm_logger.py:/app/litellm_logger.py
+      - ./logs:/app/logs
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - AUDIT_LOG_FILE=/app/logs/audit.log
     command: [ "--config", "/app/config.yaml", "--port", "4000", "--detailed_debug" ]
     networks:
       - vllm_default
     depends_on:
       - qwen
 
+  manager:
+    build:
+      context: ./manager
+      dockerfile: Dockerfile
+    container_name: vllm-manager
+    restart: unless-stopped
+    ports:
+      - "${MANAGER_PORT:-8050}:8050"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/libexec/docker/cli-plugins:/usr/local/lib/docker/cli-plugins:ro
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ./litellm_config.yaml:/app/litellm_config.yaml
+      - ./.env:/app/.env
+      - ./docker-compose.yml:/app/docker-compose.yml
+      - ./manager/main.py:/app/main.py
+      - ./manager/static:/app/static
+      - ./logs:/app/logs
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - VLLM_API_BASE=http://qwen:8000
+      - LITELLM_API_BASE=http://vllm-litellm:4000
+      - MANAGER_PORT=8050
+      - AUDIT_LOG_FILE=/app/logs/audit.log
+      - NVIDIA_VISIBLE_DEVICES=GPU-457b0f54-0926-45b5-56f0-103cb0feacbc,GPU-6afb412f-80fa-fc33-b672-2a6770592f1f,GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    networks:
+      - vllm_default
+    depends_on:
+      - qwen
+      - litellm
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: vllm-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9095}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - vllm_default
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: vllm-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3050}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/vllm-dashboard.json
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards/json:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - vllm_default
+    depends_on:
+      - prometheus
+
 networks:
   vllm_default:
+
+volumes:
+  prometheus_data:
+  grafana_data:

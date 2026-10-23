@@ -1,122 +1,137 @@
-# Triển khai vLLM tương thích với OpenAI API
+# vLLM High-Performance Serving & Mission Control Stack
 
-Dự án này thiết lập một hệ thống LLM hiệu năng cao sử dụng **vLLM** (để chạy inference) và **LiteLLM** (làm API Gateway), hoàn toàn tương thích với định dạng OpenAI API.
+Hệ thống phục vụ suy luận mô hình ngôn ngữ lớn (LLM), đa phương thức (Vision), OCR, Vector Embedding, Reranking và Structured Decisions với hiệu năng cao, tích hợp **LiteLLM Gateway** (tương thích 100% chuẩn OpenAI API), **Manager Web UI** và cụm giám sát **Prometheus + Grafana**.
 
-## Kiến trúc hệ thống
+---
 
-*   **vLLM Services**:
-    *   `vllm-text`: Container chuyên dụng cho các model xử lý văn bản (ví dụ: Qwen-8B).
-    *   `vllm-vl`: Container chuyên dụng cho các model Vision-Language (ví dụ: Qwen-VL-8B).
-*   **LiteLLM Gateway**:
-    *   Tổng hợp các dịch vụ vLLM thành một đầu mối (endpoint) API duy nhất.
-    *   Cung cấp giao diện chuẩn tương thích OpenAI (`/v1/chat/completions`, v.v.).
-    *   Quản lý xác thực (authentication) thông qua Master Key.
-*   **Traefik**:
-    *   Public dịch vụ LiteLLM ra bên ngoài thông qua domain `vllm.anm05.com` với bảo mật SSL/TLS.
+## 1. Kiến trúc hệ thống
 
-## Yêu cầu tiên quyết
+```
+                                    +-----------------------+
+                                    |     Client / Traefik  |
+                                    +-----------+-----------+
+                                                |
+                                      (Port 4000 / HTTPS)
+                                                v
+                                    +-----------------------+
+                                    |   LiteLLM Gateway     |
+                                    | (Auth, Route, Audit)  |
+                                    +---+-------+-------+---+
+                                        |       |       |
+            +---------------------------+       |       +---------------------------+
+            |                                   |                                   |
+            v                                   v                                   v
++-----------------------+           +-----------------------+           +-----------------------+
+|   vLLM Main Engine    |           |    vLLM Reranker      |           |     vLLM Embedding    |
+|     (Qwen3.5-9B)      |           | (bge-reranker-v2-m3)  |           | (Qwen3-Embedding-0.6B)|
+|   Port 8000 (TP=2)    |           |   Port 8005 (TP=1)    |           |   Port 8004 (TP=1)    |
++-----------------------+           +-----------------------+           +-----------------------+
+            |                                   |                                   |
+            v                                   v                                   v
++-----------------------+           +-----------------------+           +-----------------------+
+|   vLLM Decision Qwen  |           |     vLLM HunyuanOCR   |           |  Prometheus & Grafana |
+|    Port 8006 (TP=1)   |           |    Port 8003 (TP=1)   |           | Telemetry (3050/9095) |
++-----------------------+           +-----------------------+           +-----------------------+
+                                                ^
+                                                |
+                                    +-----------+-----------+
+                                    |    vLLM Manager UI    |
+                                    |  (Web Dashboard:8050) |
+                                    +-----------------------+
+```
 
-*   Docker & Docker Compose.
-*   NVIDIA Utilities (đã cài đặt driver đầy đủ).
-*   **NVIDIA Container Toolkit** phải được cài đặt và cấu hình để Docker có thể truy cập GPU.
+---
 
-## Cài đặt & Cấu hình
+## 2. Danh mục dịch vụ & Mô hình phục vụ
 
-### 1. Cấu hình biến môi trường (.env)
-Copy file cấu hình mẫu (hoặc tạo mới) và điền các thông tin của bạn:
+| Dịch vụ / Model | Model ID HuggingFace | Vai trò chính | Port trực tiếp | Port qua Gateway (LiteLLM) |
+| :--- | :--- | :--- | :--- | :--- |
+| **qwen** | `Qwen/Qwen3.5-9B` | LLM Text & Vision (FP8, TP=2) | `8000` (nội bộ) | `4000` (`/v1/chat/completions`) |
+| **hunyuan-ocr** | `tencent/HunyuanOCR` | OCR & Trích xuất ảnh | `8003` | `4000` (`/v1/chat/completions`) |
+| **qwen-embedding**| `Qwen/Qwen3-Embedding-0.6B` | Vector Embedding | `8004` | `4000` (`/v1/embeddings`) |
+| **bge-reranker** | `BAAI/bge-reranker-v2-m3` | Reranker đa ngôn ngữ / Tiếng Việt | `8005` | `4000` (`/v1/rerank`) |
+| **decision-qwen** | `Qwen/Qwen3.5-9B` | Structured Decisions / Classification | `8006` | `4000` (`/v1/decisions`, `/v1/systemone`) |
+| **manager** | — | Web UI quản trị, telemetry GPU & model switcher | `8050` | `8050` |
+| **prometheus** | — | Thu thập metrics hiệu năng vLLM/GPU | `9095` | `9095` |
+| **grafana** | — | Dashboard trực quan hóa realtime | `3050` | `3050` |
 
+---
+
+## 3. Yêu cầu hệ thống
+
+* **Hệ điều hành**: Linux (Ubuntu 20.04/22.04 LTS khuyến nghị).
+* **Docker & Docker Compose v2**.
+* **NVIDIA Driver & NVIDIA Container Toolkit** (`nvidia-ctk`).
+* GPU VRAM tối thiểu khuyến nghị: 24GB+ (hỗ trợ phân bổ đa GPU qua Tensor Parallel).
+
+---
+
+## 4. Cài đặt & Khởi chạy
+
+### Bước 1: Khởi tạo biến môi trường
+Sao chép file mẫu và cấu hình:
 ```bash
-# Domain cho API
-DOMAIN=vllm.anm05.com
+cp .env.example .env
+```
 
-# Model Setup (ID trên HuggingFace)
-TEXT_MODEL_ID=Qwen/Qwen3-8B
-VL_MODEL_ID=Qwen/Qwen3-VL-8B-Instruct
-
-# HuggingFace Token (Bắt buộc với các gated models)
+Chỉnh sửa `.env` phù hợp với phần cứng:
+```env
+# HuggingFace Token (nếu cần tải gated models)
 HF_TOKEN=hf_...
 
-# Phân bổ GPU (kiểm tra ID bằng lệnh `nvidia-smi`)
-TEXT_GPU_DEVICE=2
-VL_GPU_DEVICE=1
+# LiteLLM Master Key dùng để bảo vệ API Gateway
+LITELLM_MASTER_KEY=sk-your-secure-master-key-here
 
-# Bảo mật (Key này dùng để gọi API)
-LITELLM_MASTER_KEY=sk-your-secure-key-here
+# Phân bổ GPU cho cụm vLLM chính (TP=2)
+GPU_DEVICES=0,1
 ```
 
-### 2. Cấu hình LiteLLM (litellm_config.yaml)
-File này ánh xạ tên model (mà người dùng gọi) tới backend vLLM tương ứng. Bạn thường không cần sửa file này trừ khi muốn thêm container mới hoặc đổi tên model.
-
-```yaml
-model_list:
-  - model_name: qwen-text
-    litellm_params:
-      model: openai/Qwen/Qwen3-8B  # Khớp với định dạng OpenAI
-      api_base: http://vllm-text:8000/v1
-      api_key: "EMPTY"
-```
-
-## Triển khai (Deployment)
-
-Chạy lệnh sau để khởi động toàn bộ stack:
-
+### Bước 2: Khởi động hệ sinh thái
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-Kiểm tra logs để đảm bảo model được tải thành công (lần đầu tiên sẽ mất thời gian để tải model):
-
+Kiểm tra trạng thái các container:
 ```bash
-docker-compose logs -f vllm-text
-# hoặc
-docker-compose logs -f vllm-vl
+docker compose ps
 ```
 
-## Cách sử dụng (Tương thích OpenAI API)
+---
 
-Vì hệ thống tương thích với OpenAI, bạn có thể sử dụng các thư viện chuẩn (như `openai-python`) hoặc lệnh `curl` đơn giản.
+## 5. Truy cập & Sử dụng
 
-### Base URL & Keys
-*   **Base URL**: `https://vllm.anm05.com/v1` (hoặc `http://localhost:4000/v1` nếu test local không qua Traefik)
-*   **API Key**: Giá trị của `LITELLM_MASTER_KEY` trong file `.env` của bạn.
+### 1. API Gateway (OpenAI Compatible)
+* **Base URL**: `http://localhost:4000/v1` (hoặc thông qua reverse proxy `https://<DOMAIN>/v1`)
+* **Headers**: `Authorization: Bearer <LITELLM_MASTER_KEY>`
 
-### Ví dụ: Python Client
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="https://vllm.anm05.com/v1",
-    api_key="your-litellm-master-key"
-)
-
-# Chat với model Text
-response = client.chat.completions.create(
-    model="qwen-text", # Sử dụng tên model đã định nghĩa trong litellm_config.yaml
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Hello, how are you?"}
-    ]
-)
-print(response.choices[0].message.content)
-```
-
-### Ví dụ: CURL
+Ví dụ gọi Chat Completion bằng `curl`:
 ```bash
-curl -X POST https://vllm.anm05.com/v1/chat/completions \
+curl -X POST http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen-text",
-    "messages": [
-      { "role": "user", "content": "Explain quantum computing in one sentence." }
-    ]
+    "model": "qwen-3.5-9b",
+    "messages": [{"role": "user", "content": "Xin chào, hãy giới thiệu bản thân!"}],
+    "max_tokens": 100
   }'
 ```
 
-## Khả năng tương thích OpenAI hoạt động như thế nào?
-1.  **vLLM**: Image `vllm/vllm-openai` khởi chạy một API server tuân thủ nghiêm ngặt đặc tả của OpenAI. Nó cung cấp các endpoint như `/v1/models` và `/v1/chat/completions`.
-2.  **LiteLLM**: Đóng vai trò là proxy trung gian. Khi bạn gửi request đến LiteLLM, nó sẽ chuyển tiếp đến container vLLM phù hợp (`http://vllm-text:8000/v1` hoặc `http://vllm-vl:8000/v1`) trong khi vẫn giữ nguyên định dạng request/response của OpenAI.
+Chi tiết các API khác (Embedding, Reranker, Structured Decisions, Tool Calling) xem tại tài liệu [API.md](API.md).
 
-## Khắc phục sự cố (Troubleshooting)
-*   **Container liên tục restart**: Kiểm tra logs (`docker-compose logs vllm-text`). Nguyên nhân thường do tràn bộ nhớ GPU (OOM) hoặc Model ID không hợp lệ.
-*   **502 Bad Gateway**: vLLM chưa khởi động xong. Model cần thời gian để nạp vào VRAM. Hãy đợi đến khi thấy dòng "Uvicorn running on..." trong logs của vLLM.
+### 2. Giao diện Web Manager & Monitoring
+* **vLLM Mission Control Dashboard**: `http://<IP_SERVER>:8050`
+* **Grafana Dashboard**: `http://<IP_SERVER>:3050` (Tài khoản mặc định: `admin` / `admin`)
+* **Prometheus Targets**: `http://<IP_SERVER>:9095`
+
+---
+
+## 6. Đóng gói & Chuyển giao hệ thống (Air-Gapped Deployment)
+
+Dự án cung cấp script `export_bundle.sh` giúp đóng gói toàn bộ Docker Images, cấu hình và source code thành 1 file duy nhất để mang sang server offline:
+
+```bash
+chmod +x export_bundle.sh
+./export_bundle.sh
+```
+
+Kết quả sẽ sinh ra file `vllm_deploy_bundle_YYYYMMDD.tar.gz`. Trên máy chủ đích, chỉ cần giải nén và chạy `./install.sh`.

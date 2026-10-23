@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Scrape vLLM Core Engine metrics
+  - job_name: "vllm"
+    static_configs:
+      - targets: ["qwen:8000"]
+        labels:
+          instance: "vllm-qwen"
+
+  # Scrape LiteLLM Proxy metrics (nếu có prometheus metrics bật trên port 4000)
+  - job_name: "litellm"
+    static_configs:
+      - targets: ["vllm-litellm:4000"]
+        labels:
+          instance: "litellm-proxy"
+
+  # Scrape DCGM-Exporter (nếu cài thêm dcgm-exporter giám sát nhiệt, watt, vram nvidia)
+  - job_name: "nvidia-dcgm"
+    static_configs:
+      - targets: ["dcgm-exporter:9400"]
+        labels:
+          instance: "gpu-cluster"

@@ -1,1 +1,36 @@
+# Environment variables
 .env
+.env.local
+.env.*.local
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Application Logs & Data
+logs/
+*.log
+
+# Deployment & Export Bundles
+vllm_deploy_bundle_*/
+*.tar.gz
+*.tar
+
+# AI assistant / IDE local metadata & skills
+.agents/
+skills-lock.json
+.gemini/
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

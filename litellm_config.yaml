@@ -2,20 +2,120 @@ model_list:
   - model_name: qwen-3.5-9b
     model_info:
       supports_function_calling: true
+      supports_vision: true
     litellm_params:
-      model: openai/Qwen/Qwen3.8-27B-FP8
+      model: openai/Qwen/Qwen3.5-9B
       api_base: http://qwen:8000/v1
-      api_key: "EMPTY"
+      api_key: EMPTY
+      max_parallel_requests: 8
       extra_body:
         chat_template_kwargs:
           enable_thinking: false
-          max_tool_calls: 32
-          max_tool_output_tokens: 8192
-
+  - model_name: Qwen/Qwen3.5-9B
+    model_info:
+      supports_function_calling: true
+      supports_vision: true
+    litellm_params:
+      model: openai/Qwen/Qwen3.5-9B
+      api_base: http://qwen:8000/v1
+      api_key: EMPTY
+      max_parallel_requests: 8
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+  - model_name: hunyuan-ocr
+    litellm_params:
+      model: openai/tencent/HunyuanOCR
+      api_base: http://hunyuan-ocr:8000/v1
+      api_key: EMPTY
+    model_info:
+      supports_vision: true
+  - model_name: tencent/HunyuanOCR
+    litellm_params:
+      model: openai/tencent/HunyuanOCR
+      api_base: http://hunyuan-ocr:8000/v1
+      api_key: EMPTY
+    model_info:
+      supports_vision: true
+  - model_name: qwen3-embedding-0.6b
+    litellm_params:
+      model: hosted_vllm/Qwen/Qwen3-Embedding-0.6B
+      api_base: http://qwen-embedding:8000/v1
+      api_key: EMPTY
+  - model_name: Qwen/Qwen3-Embedding-0.6B
+    litellm_params:
+      model: hosted_vllm/Qwen/Qwen3-Embedding-0.6B
+      api_base: http://qwen-embedding:8000/v1
+      api_key: EMPTY
+  - model_name: bge-reranker-v2-m3
+    litellm_params:
+      model: hosted_vllm/BAAI/bge-reranker-v2-m3
+      api_base: http://bge-reranker:8000/v1
+      api_key: EMPTY
+  - model_name: BAAI/bge-reranker-v2-m3
+    litellm_params:
+      model: hosted_vllm/BAAI/bge-reranker-v2-m3
+      api_base: http://bge-reranker:8000/v1
+      api_key: EMPTY
+  - model_name: qwen-decision
+    model_info:
+      supports_decision: true
+    litellm_params:
+      model: openai/Qwen/Qwen3.5-9B
+      api_base: http://qwen:8000/v1
+      api_key: EMPTY
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+  - model_name: decision-qwen
+    model_info:
+      supports_decision: true
+    litellm_params:
+      model: openai/Qwen/Qwen3.5-9B
+      api_base: http://qwen:8000/v1
+      api_key: EMPTY
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-
+  pass_through_endpoints:
+    - path: "/v1/decisions"
+      target: "http://qwen:8000/v1/decisions"
+      headers:
+        content-type: "application/json"
+      forward_headers: true
+    - path: "/decisions"
+      target: "http://qwen:8000/v1/decisions"
+      headers:
+        content-type: "application/json"
+      forward_headers: true
+    - path: "/v1/systemone"
+      target: "http://qwen:8000/v1/systemone"
+      headers:
+        content-type: "application/json"
+      forward_headers: true
+    - path: "/systemone"
+      target: "http://qwen:8000/v1/systemone"
+      headers:
+        content-type: "application/json"
+      forward_headers: true
+    - path: "/v1/rerank"
+      target: "http://bge-reranker:8000/v1/rerank"
+      headers:
+        content-type: "application/json"
+      forward_headers: true
+    - path: "/rerank"
+      target: "http://bge-reranker:8000/rerank"
+      headers:
+        content-type: "application/json"
+      forward_headers: true
+    - path: "/v1/score"
+      target: "http://bge-reranker:8000/v1/score"
+      headers:
+        content-type: "application/json"
+      forward_headers: true
 litellm_settings:
-  # Cấu hình mỗi User hoặc IP chỉ được gửi bao nhiêu requests mỗi phút (RPM - Requests Per Minute)
-  max_user_rpm: 60
   drop_params: true
+  callbacks: ["litellm_logger.proxy_logger"]
+
