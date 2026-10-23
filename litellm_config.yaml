@@ -7,7 +7,7 @@ model_list:
       model: openai/Qwen/Qwen3.5-9B
       api_base: http://qwen:8000/v1
       api_key: EMPTY
-      max_parallel_requests: 8
+      max_parallel_requests: 16
       extra_body:
         chat_template_kwargs:
           enable_thinking: false
@@ -19,7 +19,7 @@ model_list:
       model: openai/Qwen/Qwen3.5-9B
       api_base: http://qwen:8000/v1
       api_key: EMPTY
-      max_parallel_requests: 8
+      max_parallel_requests: 16
       extra_body:
         chat_template_kwargs:
           enable_thinking: false
