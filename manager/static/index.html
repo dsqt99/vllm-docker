@@ -51,17 +51,6 @@
           </svg>
           API Key
         </button>
-
-        <button class="btn btn-primary btn-sm" onclick="openSwitchModal('')" title="Thay mô hình trên container qwen chính">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="16 3 21 3 21 8"/>
-            <line x1="4" y1="20" x2="21" y2="3"/>
-            <polyline points="21 16 21 21 16 21"/>
-            <line x1="15" y1="15" x2="21" y2="21"/>
-            <line x1="4" y1="4" x2="9" y2="9"/>
-          </svg>
-          Đổi mô hình chính
-        </button>
       </div>
     </div>
   </header>
@@ -291,11 +280,19 @@
 
             <div class="param-row" style="margin-top: 0.8rem;">
               <label>Cổng Đích (Target)</label>
-              <select id="chatTargetSelect" class="form-select-sm">
+              <select id="chatTargetSelect" class="form-select-sm" onchange="refreshChatModels()">
                 <option value="vllm" selected>Trực tiếp vLLM (:8000)</option>
                 <option value="litellm">Proxy LiteLLM (:4000)</option>
               </select>
             </div>
+
+            <div class="param-row" style="margin-top: 0.8rem;">
+              <label for="chatModelSelect">Mô Hình / LoRA</label>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="refreshChatModels()" title="Làm mới danh sách mô hình" style="padding: 0.1rem 0.4rem; font-size: 0.72rem; line-height: 1;">↻</button>
+            </div>
+            <select id="chatModelSelect" class="form-select-sm" style="width: 100%; margin-top: 0.35rem;">
+              <option value="">Đang tải danh sách model...</option>
+            </select>
           </div>
 
           <div class="sidebar-block">
@@ -559,89 +556,6 @@
     </div>
 
   </main>
-
-  <!-- Modal Chuyển Đổi Mô Hình (Model Switcher) -->
-  <div id="switchModal" class="modal-overlay">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3>Đổi mô hình trên container qwen</h3>
-        <button class="btn btn-secondary btn-sm" onclick="closeSwitchModal()">✕</button>
-      </div>
-
-      <form id="switchForm">
-        <div class="modal-body">
-          <p class="modal-note">Chỉ container <code>qwen</code> chính được nạp lại. Các dịch vụ OCR, embedding, reranker, decision và route LiteLLM của chúng giữ nguyên.</p>
-          <div class="form-group">
-            <label class="form-label">Mã Mô Hình (Model ID)</label>
-            <input type="text" id="switchModelId" class="form-input" required placeholder="Ví dụ: Qwen/Qwen3.8-27B-FP8">
-            <span class="form-help">Khớp với tên thư mục mô hình trong cache HuggingFace</span>
-          </div>
-
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label class="form-label">Tensor Parallel Size (TP)</label>
-              <select id="switchTpSize" class="form-select">
-                <option value="1">TP = 1 (Chạy trên 1 GPU)</option>
-                <option value="2" selected>TP = 2 (Phân bổ trên 2 GPU - Chuẩn 27B/32B)</option>
-                <option value="4">TP = 4 (Phân bổ trên toàn bộ 4 GPU)</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">GPU Memory Utilization</label>
-              <select id="switchMemUtil" class="form-select">
-                <option value="0.85">0.85 (An toàn, tránh tràn VRAM)</option>
-                <option value="0.90" selected>0.90 (Chuẩn vLLM khuyên dùng)</option>
-                <option value="0.92">0.92 (Tối đa dung lượng KV Cache)</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Độ Dài Ngữ Cảnh Tối Đa (Max Model Len)</label>
-            <select id="switchMaxLen" class="form-select">
-              <option value="16384">16,384 tokens</option>
-              <option value="32768" selected>32,768 tokens (Chuẩn văn bản hành chính dài)</option>
-              <option value="65536">65,536 tokens (Cần theo dõi sát VRAM)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Chọn GPU Thực Thi Vật Lý (Khớp với số lượng TP)</label>
-            <div class="gpu-checkbox-group">
-              <label class="gpu-check-label">
-                <input type="checkbox" name="gpuSelect" value="0" checked>
-                <span>GPU 0 (RTX 3090)</span>
-              </label>
-              <label class="gpu-check-label">
-                <input type="checkbox" name="gpuSelect" value="1">
-                <span>GPU 1 (RTX 3090)</span>
-              </label>
-              <label class="gpu-check-label">
-                <input type="checkbox" name="gpuSelect" value="2" checked>
-                <span>GPU 2 (RTX 3090)</span>
-              </label>
-              <label class="gpu-check-label">
-                <input type="checkbox" name="gpuSelect" value="3">
-                <span>GPU 3 (RTX 3090)</span>
-              </label>
-            </div>
-            <span class="form-help form-warning">Số GPU chọn bắt buộc phải bằng với Tensor Parallel Size. Mặc định cụm là GPU 0 và GPU 2.</span>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" onclick="closeSwitchModal()">Hủy</button>
-          <button type="submit" class="btn btn-primary">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-            Xác Nhận & Khởi Động
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <!-- Modal Thêm Mô Hình Mới (Import Offline hoặc Tải Hugging Face) -->
   <div id="addModelModal" class="modal-overlay">

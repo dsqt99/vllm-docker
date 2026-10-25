@@ -70,6 +70,7 @@ const API = {
   loraLoad: '/api/lora/load',
   loraUnload: '/api/lora/unload',
   testChat: '/api/test/chat',
+  testModels: '/api/test/models',
   auditLogs: '/api/audit/logs',
   auditClear: '/api/audit/clear'
 };
@@ -132,6 +133,8 @@ function switchTab(tabId) {
     refreshAuditLogs();
   } else if (tabId === 'tab-logs') {
     refreshLogs();
+  } else if (tabId === 'tab-chat') {
+    refreshChatModels();
   }
 }
 
@@ -647,20 +650,20 @@ function renderModelsTable(models) {
     }
 
     const deleteBtn = `
-      <button class="icon-btn danger btn-delete-model" title="Xóa khỏi ổ cứng" aria-label="Xóa ${safeRepoName}">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button class="btn btn-danger btn-sm btn-delete-model" title="Xóa cache mô hình khỏi ổ cứng">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 3px;">
           <polyline points="3 6 5 6 21 6"/>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
+        </svg>Xóa cache
       </button>`;
 
     let actionsHtml;
     if (deps.length) {
-      actionsHtml = `<button class="btn btn-secondary btn-sm" data-container="${escapeHtml(deps[0].container)}">Cấu hình</button>`;
+      actionsHtml = `<button class="btn btn-secondary btn-sm" data-container="${escapeHtml(deps[0].container)}">Cấu hình</button>${deleteBtn}`;
     } else if (rowState === 'broken') {
       actionsHtml = `<button class="btn btn-secondary btn-sm btn-redownload">Tải lại</button>${deleteBtn}`;
     } else {
-      actionsHtml = `<button class="btn btn-primary btn-sm btn-switch" title="Nạp mô hình này vào container qwen chính">Nạp vào qwen</button>${deleteBtn}`;
+      actionsHtml = deleteBtn;
     }
 
     tr.innerHTML = `
@@ -677,8 +680,8 @@ function renderModelsTable(models) {
       <td class="col-actions"><div class="row-actions">${actionsHtml}</div></td>
     `;
 
-    tr.querySelector('.btn-switch')?.addEventListener('click', () => openSwitchModal(m.model_id));
-    tr.querySelector('.btn-delete-model')?.addEventListener('click', () => deleteModel(m.model_id, m.repo_name, m.size_gb));
+    const runningContainers = deps.filter(d => d.running).map(d => d.container);
+    tr.querySelector('.btn-delete-model')?.addEventListener('click', () => deleteModel(m.model_id, m.repo_name, m.size_gb, runningContainers));
     tr.querySelector('.btn-redownload')?.addEventListener('click', () => redownloadModel(m.model_id));
     tr.querySelectorAll('[data-container]').forEach(el => {
       el.addEventListener('click', () => openDeployDrawer(el.dataset.container));
@@ -705,11 +708,16 @@ async function redownloadModel(modelId) {
 }
 
 // Model Deletion
-async function deleteModel(modelId, repoName, sizeGb) {
-  if (!confirm(`Xác nhận xóa vĩnh viễn mô hình '${repoName}' (${sizeGb} GB) khỏi ổ cứng máy chủ để giải phóng dung lượng?`)) return;
+async function deleteModel(modelId, repoName, sizeGb, runningContainers = []) {
+  if (runningContainers.length > 0) {
+    showToast(`Không thể xóa: Container '${runningContainers.join(', ')}' đang chạy mô hình này. Vui lòng dừng container trước khi xóa cache.`, 'warning');
+    return;
+  }
+
+  if (!confirm(`Xác nhận xóa vĩnh viễn cache mô hình '${repoName}' (${sizeGb} GB) khỏi ổ cứng máy chủ để giải phóng dung lượng?`)) return;
 
   try {
-    showToast(`Đang xóa mô hình ${repoName}...`, 'info');
+    showToast(`Đang xóa cache mô hình ${repoName}...`, 'info');
     const res = await fetch(API.modelDelete, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -719,6 +727,8 @@ async function deleteModel(modelId, repoName, sizeGb) {
     if (res.ok && data.success) {
       showToast(data.message, 'success');
       refreshLocalModels();
+      refreshDeployments();
+      refreshChatModels();
     } else {
       showToast(data.detail || 'Lỗi khi xóa mô hình', 'error');
     }
@@ -880,6 +890,7 @@ async function loadLoraPrompt() {
     if (res.ok && data.success) {
       showToast(data.message, 'success');
       refreshLoraAdapters();
+      refreshChatModels();
     } else {
       showToast(data.error || 'Lỗi nạp LoRA', 'error');
     }
@@ -902,6 +913,7 @@ async function unloadLora(name) {
     if (res.ok && data.success) {
       showToast(data.message, 'success');
       refreshLoraAdapters();
+      refreshChatModels();
     } else {
       showToast(data.error || 'Lỗi gỡ LoRA', 'error');
     }
@@ -1012,6 +1024,53 @@ async function submitModelSwitch(e) {
   }
 }
 
+// Model Selector for Live Smoke Test Chat
+async function refreshChatModels() {
+  const modelSelect = document.getElementById('chatModelSelect');
+  if (!modelSelect) return;
+
+  const target = document.getElementById('chatTargetSelect')?.value || 'vllm';
+  const previousValue = modelSelect.value;
+
+  try {
+    const res = await fetch(`${API.testModels}?target=${encodeURIComponent(target)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const models = data.models || [];
+
+    modelSelect.replaceChildren();
+
+    if (models.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = data.default || '';
+      opt.textContent = data.default || 'Mô hình mặc định';
+      modelSelect.appendChild(opt);
+      return;
+    }
+
+    let hasSelected = false;
+    models.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label || m.id;
+      if (previousValue && m.id === previousValue) {
+        opt.selected = true;
+        hasSelected = true;
+      } else if (!hasSelected && !previousValue && (m.id === data.default || m.id === 'Qwen/Qwen3.5-9B' || m.id === 'qwen-3.5-9b')) {
+        opt.selected = true;
+        hasSelected = true;
+      }
+      modelSelect.appendChild(opt);
+    });
+
+    if (!hasSelected && modelSelect.options.length > 0) {
+      modelSelect.options[0].selected = true;
+    }
+  } catch (err) {
+    console.error('Lỗi nạp danh sách model test:', err);
+  }
+}
+
 // Live Smoke Test Chat Stream
 async function handleSendChat() {
   const input = document.getElementById('chatInput');
@@ -1046,6 +1105,7 @@ async function handleSendChat() {
   const temp = parseFloat(document.getElementById('paramTemp')?.value || '0.7');
   const maxTokens = parseInt(document.getElementById('paramMaxTokens')?.value || '512');
   const target = document.getElementById('chatTargetSelect')?.value || 'vllm';
+  const model = document.getElementById('chatModelSelect')?.value || undefined;
 
   try {
     const response = await fetch(API.testChat, {
@@ -1053,6 +1113,7 @@ async function handleSendChat() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: state.chatHistory,
+        model: model,
         target: target,
         temperature: temp,
         max_tokens: maxTokens,
@@ -1505,6 +1566,7 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshLoraAdapters();
   refreshLogs();
   refreshAuditLogs();
+  refreshChatModels();
 
   // 3.5s Polling for real-time telemetry
   setInterval(() => {

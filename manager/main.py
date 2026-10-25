@@ -681,20 +681,12 @@ active_downloads: Dict[str, Dict[str, Any]] = {}
 
 @app.post("/api/models/delete")
 async def api_delete_model(req: DeleteModelRequest):
-    env = read_current_env()
-    current_active = env.get("MODEL_ID", "").strip()
-
-    if req.model_id.strip() == current_active:
+    deployments = [d for d in discover_deployments(max_age=0) if d.get("model_id") == req.model_id.strip()]
+    running_users = [d["container"] for d in deployments if d.get("running")]
+    if running_users:
         raise HTTPException(
             status_code=400,
-            detail=f"Không thể xóa mô hình '{req.model_id}' vì đang là mô hình hoạt động chính của cụm vLLM. Vui lòng chuyển sang mô hình khác trước khi xóa."
-        )
-
-    users = [d["container"] for d in discover_deployments(max_age=0) if d["model_id"] == req.model_id.strip()]
-    if users:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Không thể xóa '{req.model_id}' vì container {', '.join(users)} đang được cấu hình để phục vụ mô hình này."
+            detail=f"Không thể xóa cache '{req.model_id}' vì container '{', '.join(running_users)}' đang chạy phục vụ mô hình này. Vui lòng dừng container trước khi xóa cache."
         )
 
     if not HF_CACHE_DIR.exists():
@@ -1284,6 +1276,72 @@ async def api_lora_unload(req: LoRAUnloadRequest):
     except Exception as e:
         logger.error(f"Error unloading LoRA: {e}")
         raise HTTPException(status_code=500, detail=f"Không thể kết nối vLLM: {e}")
+
+@app.get("/api/test/models")
+async def api_test_models(target: str = "vllm"):
+    env = read_current_env()
+    current_model = env.get("MODEL_ID", "qwen-text")
+    models = []
+    seen = set()
+
+    def add_model(mid: str, label: str, mtype: str):
+        if not mid or mid in seen:
+            return
+        seen.add(mid)
+        models.append({"id": mid, "label": label, "type": mtype})
+
+    target_clean = (target or "vllm").lower()
+    if target_clean == "litellm":
+        # 1. Try querying LiteLLM /v1/models
+        try:
+            headers = {"Authorization": f"Bearer {LITELLM_MASTER_KEY}"} if LITELLM_MASTER_KEY else {}
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{LITELLM_API_BASE}/v1/models", headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data.get("data", []):
+                        m_id = item.get("id")
+                        if m_id:
+                            add_model(m_id, f"{m_id}", "litellm")
+        except Exception as e:
+            logger.warning(f"Failed to query LiteLLM models: {e}")
+
+        # 2. Also read from litellm_config.yaml to ensure any unlisted or configured routes are listed
+        if LITELLM_CONFIG_PATH.exists():
+            try:
+                with open(LITELLM_CONFIG_PATH, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                for entry in config.get("model_list") or []:
+                    m_name = entry.get("model_name")
+                    if m_name and m_name not in seen:
+                        add_model(m_name, f"{m_name}", "litellm")
+            except Exception as e:
+                logger.warning(f"Failed to parse litellm_config.yaml: {e}")
+
+        if not models:
+            add_model(current_model, f"{current_model} (Mặc định)", "base")
+    else:
+        # Default: direct to vLLM
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{VLLM_API_BASE}/v1/models")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data.get("data", []):
+                        m_id = item.get("id")
+                        if not m_id:
+                            continue
+                        if item.get("parent") or item.get("parent_model"):
+                            add_model(m_id, f"{m_id} (LoRA Adapter)", "lora")
+                        else:
+                            add_model(m_id, f"{m_id} (Base Model)", "base")
+        except Exception as e:
+            logger.warning(f"Failed to query vLLM models: {e}")
+
+        if current_model not in seen:
+            models.insert(0, {"id": current_model, "label": f"{current_model} (Cấu hình .env)", "type": "base"})
+
+    return {"models": models, "default": current_model}
 
 @app.post("/api/test/chat")
 async def api_test_chat(req: ChatTestRequest):
