@@ -996,9 +996,52 @@ def record_audit_entry(entry: dict):
     except Exception as e:
         logger.error(f"Failed to record audit entry: {e}")
 
+# Byte-offset index over audit.log so paging doesn't re-parse the whole file.
+# Each entry: (offset, length, status, model, latency_ms). Appends are indexed
+# incrementally; a truncated or rotated file is re-indexed from scratch.
+_audit_index: Dict[str, Any] = {"path": None, "inode": None, "pos": 0, "entries": []}
+
+def audit_index(log_path: Path) -> List[tuple]:
+    st = log_path.stat()
+    idx = _audit_index
+    if idx["path"] != str(log_path) or idx["inode"] != st.st_ino or st.st_size < idx["pos"]:
+        idx.update(path=str(log_path), inode=st.st_ino, pos=0, entries=[])
+    if st.st_size > idx["pos"]:
+        with open(log_path, "rb") as f:
+            f.seek(idx["pos"])
+            offset = idx["pos"]
+            for raw in f:
+                if not raw.endswith(b"\n"):
+                    break  # line still being written by the LiteLLM logger
+                line = raw.strip()
+                if line:
+                    try:
+                        item = json.loads(line)
+                    except Exception:
+                        item = None
+                    if isinstance(item, dict):
+                        idx["entries"].append((
+                            offset,
+                            len(raw),
+                            str(item.get("status", "unknown")).lower(),
+                            item.get("model", "unknown"),
+                            item.get("latency_ms", 0) or 0,
+                        ))
+                offset += len(raw)
+            idx["pos"] = offset
+    return idx["entries"]
+
+def _read_audit_entry(f, entry: tuple) -> Optional[dict]:
+    f.seek(entry[0])
+    try:
+        return json.loads(f.read(entry[1]))
+    except Exception:
+        return None
+
 @app.get("/api/audit/logs")
 async def api_audit_logs(
     limit: int = 150,
+    offset: int = 0,
     status: Optional[str] = "all",
     model: Optional[str] = None,
     search: Optional[str] = None
@@ -1017,74 +1060,49 @@ async def api_audit_logs(
             "models": []
         }
 
-    all_entries = []
-    models_found = set()
-    total_latency = 0.0
-    latency_count = 0
-    success_count = 0
-    error_count = 0
-
     try:
-        with open(log_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+        entries = audit_index(log_path)
 
-        for line in reversed(lines):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                item = json.loads(line)
-            except Exception:
-                continue
-
-            item_status = item.get("status", "unknown").lower()
-            item_model = item.get("model", "unknown")
-            if item_model:
-                models_found.add(item_model)
-
-            lat = item.get("latency_ms", 0)
-            if lat:
-                total_latency += lat
-                latency_count += 1
-
-            if item_status == "success":
-                success_count += 1
-            elif item_status == "error":
-                error_count += 1
-
-            # Filter by status
-            if status and status != "all" and item_status != status.lower():
-                continue
-
-            # Filter by model
-            if model and model != "all" and item_model != model:
-                continue
-
-            # Filter by search keyword
-            if search:
-                s_lower = search.lower()
-                content_str = json.dumps(item, ensure_ascii=False).lower()
-                if s_lower not in content_str:
-                    continue
-
-            all_entries.append(item)
-
+        success_count = sum(1 for e in entries if e[2] == "success")
+        error_count = sum(1 for e in entries if e[2] == "error")
+        latencies = [e[4] for e in entries if e[4]]
         total_reqs = success_count + error_count
-        error_rate = round((error_count / total_reqs * 100), 1) if total_reqs > 0 else 0
-        avg_latency = round(total_latency / latency_count, 1) if latency_count > 0 else 0
-
         stats = {
             "total": total_reqs,
             "success": success_count,
             "error": error_count,
-            "error_rate": error_rate,
-            "avg_latency_ms": avg_latency
+            "error_rate": round((error_count / total_reqs * 100), 1) if total_reqs > 0 else 0,
+            "avg_latency_ms": round(sum(latencies) / len(latencies), 1) if latencies else 0
         }
 
+        status_filter = status.lower() if status and status != "all" else None
+        model_filter = model if model and model != "all" else None
+        candidates = [
+            e for e in reversed(entries)
+            if (not status_filter or e[2] == status_filter) and (not model_filter or e[3] == model_filter)
+        ]
+
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        with open(log_path, "rb") as f:
+            if search:
+                # Full-text search still has to read every candidate body
+                s_lower = search.lower()
+                matched = []
+                for e in candidates:
+                    item = _read_audit_entry(f, e)
+                    if item is not None and s_lower in json.dumps(item, ensure_ascii=False).lower():
+                        matched.append(e)
+                candidates = matched
+            page = [item for item in (_read_audit_entry(f, e) for e in candidates[offset:offset + limit]) if item is not None]
+
         return {
-            "logs": all_entries[:limit],
+            "logs": page,
+            "total_filtered": len(candidates),
+            "offset": offset,
+            "limit": limit,
             "stats": stats,
-            "models": sorted(list(models_found))
+            "models": sorted({e[3] for e in entries if e[3]})
         }
     except Exception as e:
         logger.error(f"Error reading audit logs: {e}")

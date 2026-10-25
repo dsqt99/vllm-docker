@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>vLLM Mission Control | Cụm Mô Hình Đa GPU Nội Bộ</title>
-  <link rel="stylesheet" href="/static/style.css?v=20261025_drawer">
+  <link rel="stylesheet" href="/static/style.css?v=20261025_pager">
 </head>
 <body>
 
@@ -325,7 +325,7 @@
         <div class="chat-main-view">
           <div class="panel-card-header">
             <div class="header-meta">
-              <h3>Khung Kiểm Thử Trực Tiếp (Smoke Test Chat - HM2-34)</h3>
+              <h3>Khung Kiểm Thử Trực Tiếp (Smoke Test Chat)</h3>
               <p>Luồng Server-Sent Events (SSE) thời gian thực kết nối thẳng tới vLLM Core</p>
             </div>
             <button class="btn btn-secondary btn-sm" onclick="clearChat()">Xóa Hội Thoại</button>
@@ -357,7 +357,7 @@
       <div class="panel-card">
         <div class="panel-card-header">
           <div class="header-meta">
-            <h3>Quản Lý Checkpoint & LoRA Hot-Swap (HM2-30, HM2-33)</h3>
+            <h3>Quản Lý Checkpoint & LoRA Hot-Swap</h3>
             <p>Nạp nóng adapter SFT/DPO chuyên ngành CAND và Hưng Yên mà không cần dừng container</p>
           </div>
           <div class="header-actions">
@@ -395,7 +395,7 @@
       <div class="panel-card">
         <div class="panel-card-header">
           <div class="header-meta">
-            <h3>Nhật ký container (HM2-27)</h3>
+            <h3>Nhật ký container</h3>
             <p>Theo dõi quá trình nạp trọng số, cấp phát KV cache và các yêu cầu suy luận</p>
           </div>
           <div class="header-actions">
@@ -465,15 +465,15 @@
           </div>
           <div class="audit-controls">
             <div class="audit-status-filter-group">
-              <button class="filter-chip active" id="chipAuditAll" onclick="setAuditStatusFilter('all')">Tất Cả</button>
-              <button class="filter-chip chip-rose" id="chipAuditError" onclick="setAuditStatusFilter('error')">
+              <button class="filter-chip active" data-status="all" id="chipAuditAll" onclick="setAuditStatusFilter('all')">Tất Cả</button>
+              <button class="filter-chip chip-rose" data-status="error" id="chipAuditError" onclick="setAuditStatusFilter('error')">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 Chỉ Xem Lỗi
               </button>
-              <button class="filter-chip chip-emerald" id="chipAuditSuccess" onclick="setAuditStatusFilter('success')">Thành Công</button>
+              <button class="filter-chip chip-emerald" data-status="success" id="chipAuditSuccess" onclick="setAuditStatusFilter('success')">Thành Công</button>
             </div>
 
-            <select id="auditModelFilter" class="form-select select-sm" onchange="refreshAuditLogs()">
+            <select id="auditModelFilter" class="form-select select-sm" onchange="state.auditPage = 1; refreshAuditLogs()">
               <option value="all">Tất cả Models</option>
             </select>
 
@@ -541,6 +541,20 @@
             </tbody>
           </table>
         </div>
+        <nav class="pager" id="auditPager" aria-label="Phân trang nhật ký audit">
+          <div class="pager-info" id="auditPagerInfo" aria-live="polite">--</div>
+          <div class="pager-controls">
+            <label class="pager-size">
+              <span>Mỗi trang</span>
+              <select id="auditPageSize" class="form-select-sm" onchange="setAuditPageSize(this.value)">
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+            <div class="pager-pages" id="auditPagerPages"></div>
+          </div>
+        </nav>
       </div>
     </div>
 
@@ -550,7 +564,7 @@
   <div id="switchModal" class="modal-overlay">
     <div class="modal-box">
       <div class="modal-header">
-        <h3>Đổi mô hình trên container qwen (HM2-03, HM2-05)</h3>
+        <h3>Đổi mô hình trên container qwen</h3>
         <button class="btn btn-secondary btn-sm" onclick="closeSwitchModal()">✕</button>
       </div>
 
@@ -787,6 +801,6 @@
   <!-- Toast Notifications Container -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="/static/app.js?v=20261025_drawer"></script>
+  <script src="/static/app.js?v=20261025_pager"></script>
 </body>
 </html>

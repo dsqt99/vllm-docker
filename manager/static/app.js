@@ -87,6 +87,8 @@ const state = {
   auditStatus: 'all',
   auditModel: 'all',
   auditSearch: '',
+  auditPage: 1,
+  auditPageSize: 25,
   auditAutoRefreshTimer: null
 };
 
@@ -1193,13 +1195,15 @@ function debounceAuditSearch() {
   searchDebounceTimer = setTimeout(() => {
     const input = document.getElementById('auditSearchInput');
     state.auditSearch = input ? input.value.trim() : '';
+    state.auditPage = 1;
     refreshAuditLogs();
   }, 350);
 }
 
 function setAuditStatusFilter(status) {
   state.auditStatus = status;
-  document.querySelectorAll('.filter-chip').forEach(chip => {
+  state.auditPage = 1;
+  document.querySelectorAll('.filter-chip[data-status]').forEach(chip => {
     chip.classList.toggle('active', chip.dataset.status === status);
   });
   const chipAll = document.getElementById('chipAuditAll');
@@ -1240,7 +1244,8 @@ async function refreshAuditLogs(isSilent = false) {
   const selectedModel = modelSelect ? modelSelect.value : 'all';
 
   const params = new URLSearchParams({
-    limit: '150',
+    limit: String(state.auditPageSize),
+    offset: String((state.auditPage - 1) * state.auditPageSize),
     status: state.auditStatus || 'all'
   });
   if (selectedModel && selectedModel !== 'all') params.append('model', selectedModel);
@@ -1251,6 +1256,15 @@ async function refreshAuditLogs(isSilent = false) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     state.auditLogs = data.logs || [];
+
+    // Filtered set shrank (cleared or rotated log): step back to the last page that exists
+    const totalFiltered = data.total_filtered ?? state.auditLogs.length;
+    const lastPage = Math.max(1, Math.ceil(totalFiltered / state.auditPageSize));
+    if (state.auditPage > lastPage) {
+      state.auditPage = lastPage;
+      return refreshAuditLogs(isSilent);
+    }
+    renderAuditPager(totalFiltered);
 
     // Update stats counters
     const stats = data.stats || {};
@@ -1669,3 +1683,60 @@ function closeDeployDrawer() {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeDeployDrawer();
 });
+
+// ---- Audit pagination
+function auditPageWindow(current, last) {
+  // 1 … 4 5 [6] 7 8 … 20
+  const pages = new Set([1, last]);
+  for (let p = current - 2; p <= current + 2; p++) if (p >= 1 && p <= last) pages.add(p);
+  const sorted = [...pages].sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push(null);
+    out.push(p);
+  });
+  return out;
+}
+
+function renderAuditPager(totalFiltered) {
+  const info = document.getElementById('auditPagerInfo');
+  const pagesEl = document.getElementById('auditPagerPages');
+  if (!info || !pagesEl) return;
+
+  const size = state.auditPageSize;
+  const last = Math.max(1, Math.ceil(totalFiltered / size));
+  const page = Math.min(state.auditPage, last);
+  const from = totalFiltered === 0 ? 0 : (page - 1) * size + 1;
+  const to = Math.min(page * size, totalFiltered);
+  info.innerHTML = `Hiển thị <b>${from.toLocaleString('vi-VN')}–${to.toLocaleString('vi-VN')}</b> / ${totalFiltered.toLocaleString('vi-VN')} bản ghi`;
+
+  const arrow = (target, label, path, disabled) =>
+    `<button type="button" class="pager-btn" data-page="${target}" aria-label="${label}" ${disabled ? 'disabled' : ''}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="${path}"/></svg>
+    </button>`;
+
+  pagesEl.innerHTML = [
+    arrow(page - 1, 'Trang trước', '15 18 9 12 15 6', page <= 1),
+    ...auditPageWindow(page, last).map(p => p === null
+      ? '<span class="pager-gap" aria-hidden="true">…</span>'
+      : `<button type="button" class="pager-btn ${p === page ? 'active' : ''}" data-page="${p}" ${p === page ? 'aria-current="page"' : ''}>${p}</button>`),
+    arrow(page + 1, 'Trang sau', '9 18 15 12 9 6', page >= last)
+  ].join('');
+
+  pagesEl.querySelectorAll('[data-page]').forEach(btn => {
+    btn.addEventListener('click', () => goToAuditPage(parseInt(btn.dataset.page, 10)));
+  });
+}
+
+function goToAuditPage(page) {
+  if (!Number.isFinite(page) || page < 1) return;
+  state.auditPage = page;
+  refreshAuditLogs();
+  document.getElementById('auditTable')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setAuditPageSize(size) {
+  state.auditPageSize = parseInt(size, 10) || 25;
+  state.auditPage = 1;
+  refreshAuditLogs();
+}
