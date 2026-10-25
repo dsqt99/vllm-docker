@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>vLLM Mission Control | Cụm Mô Hình Đa GPU Nội Bộ</title>
-  <link rel="stylesheet" href="/static/style.css?v=20261018_taste_v2">
+  <link rel="stylesheet" href="/static/style.css?v=20261025_drawer">
 </head>
 <body>
 
@@ -32,8 +32,8 @@
       <!-- Quick Cluster Status Pill -->
       <div class="header-center-pill">
         <div class="pill-item">
-          <span class="pill-label">Serving:</span>
-          <span id="currentModelBadge" class="pill-value">Đang tải...</span>
+          <span class="pill-label">Đang phục vụ</span>
+          <span id="servingSummary" class="pill-value">-- / -- dịch vụ</span>
         </div>
         <div class="pill-divider"></div>
         <div class="pill-item">
@@ -52,14 +52,7 @@
           API Key
         </button>
 
-        <button class="btn btn-secondary btn-sm" onclick="handleContainerAction('restart', 'qwen')" title="Khởi động lại vLLM container">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-          </svg>
-          Khởi Động Lại
-        </button>
-
-        <button class="btn btn-primary btn-sm" onclick="openSwitchModal('')">
+        <button class="btn btn-primary btn-sm" onclick="openSwitchModal('')" title="Thay mô hình trên container qwen chính">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="16 3 21 3 21 8"/>
             <line x1="4" y1="20" x2="21" y2="3"/>
@@ -67,7 +60,7 @@
             <line x1="15" y1="15" x2="21" y2="21"/>
             <line x1="4" y1="4" x2="9" y2="9"/>
           </svg>
-          Chuyển Đổi Mô Hình
+          Đổi mô hình chính
         </button>
       </div>
     </div>
@@ -80,11 +73,11 @@
     <section class="metrics-bento">
       <div class="metric-card">
         <div class="metric-header">
-          <span class="metric-title">Mô Hình Kích Hoạt</span>
-          <span class="badge badge-cyan" id="metricTpBadge">TP = 2</span>
+          <span class="metric-title">Dịch vụ suy luận</span>
+          <span class="badge badge-emerald" id="bentoServingBadge">-- healthy</span>
         </div>
-        <div class="metric-main-val" id="bentoModelName">Qwen 27B FP8</div>
-        <div class="metric-sub" id="bentoModelSub">PagedAttention / Marlin Kernel</div>
+        <div class="metric-main-val font-mono" id="bentoServingVal">-- / --</div>
+        <div class="metric-sub" id="bentoServingSub">Đang dò container vLLM...</div>
       </div>
 
       <div class="metric-card">
@@ -98,7 +91,7 @@
 
       <div class="metric-card">
         <div class="metric-header">
-          <span class="metric-title">KV Cache & Ngữ Cảnh</span>
+          <span class="metric-title">Ngữ cảnh mô hình chính</span>
           <span class="badge badge-emerald" id="bentoCtxBadge">256K Context</span>
         </div>
         <div class="metric-main-val font-mono" id="bentoCtxVal">262,144 Tokens</div>
@@ -107,11 +100,27 @@
 
       <div class="metric-card">
         <div class="metric-header">
-          <span class="metric-title">An Toàn & Bảo Mật</span>
-          <span class="badge badge-emerald">Cấp Bộ</span>
+          <span class="metric-title">Cổng LiteLLM</span>
+          <span class="badge badge-amber" id="bentoGatewayBadge">--</span>
         </div>
-        <div class="metric-main-val">100% Offline</div>
-        <div class="metric-sub">Mạng nội bộ / Zero Cloud Leak</div>
+        <div class="metric-main-val font-mono" id="bentoGatewayVal">-- route</div>
+        <div class="metric-sub">Mạng nội bộ, không gọi cloud</div>
+      </div>
+    </section>
+
+    <!-- Running vLLM deployments (one row per serving container) -->
+    <section class="panel-card deploy-section" aria-labelledby="deployTitle">
+      <div class="panel-card-header">
+        <div class="header-meta">
+          <h3 id="deployTitle">Dịch vụ đang triển khai</h3>
+          <p>Mỗi container vLLM phục vụ một mô hình riêng. Route LiteLLM là tên gọi qua cổng :4000.</p>
+        </div>
+        <span class="telemetry-indicator"><span class="dot-pulse"></span> Cập nhật 3.5s</span>
+      </div>
+      <div id="deployList" class="deploy-list" role="list">
+        <div class="deploy-skeleton"></div>
+        <div class="deploy-skeleton"></div>
+        <div class="deploy-skeleton"></div>
       </div>
     </section>
 
@@ -131,7 +140,7 @@
             <line x1="1" y1="9" x2="4" y2="9"/>
             <line x1="1" y1="14" x2="4" y2="14"/>
           </svg>
-          <h3 id="gpuRackTitle">Giám Sát Phần Cứng GPU NVIDIA RTX 3090</h3>
+          <h3 id="gpuRackTitle">Phần cứng GPU</h3>
         </div>
         <span class="telemetry-indicator"><span class="dot-pulse"></span> Polling 3.5s</span>
       </div>
@@ -150,14 +159,14 @@
           <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
           <line x1="12" y1="22.08" x2="12" y2="12"/>
         </svg>
-        Kho Mô Hình Local <span class="tab-count" id="tabCountModels">--</span>
+        Kho mô hình <span class="tab-count" id="tabCountModels">--</span>
       </button>
 
       <button class="tab-btn" data-tab="tab-chat" onclick="switchTab('tab-chat')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
-        Thử Nghiệm Trực Tiếp (Smoke Test)
+        Thử nghiệm nhanh
       </button>
 
       <button class="tab-btn" data-tab="tab-lora" onclick="switchTab('tab-lora')">
@@ -166,7 +175,7 @@
           <polyline points="2 17 12 22 22 17"/>
           <polyline points="2 12 12 17 22 12"/>
         </svg>
-        LoRA & Checkpoint <span class="tab-count" id="tabCountLora">0</span>
+        LoRA & checkpoint <span class="tab-count" id="tabCountLora">0</span>
       </button>
 
       <button class="tab-btn" data-tab="tab-logs" onclick="switchTab('tab-logs')">
@@ -174,7 +183,7 @@
           <polyline points="4 17 10 11 4 5"/>
           <line x1="12" y1="19" x2="20" y2="19"/>
         </svg>
-        Nhật Ký Engine (Live Logs)
+        Nhật ký container
       </button>
 
       <button class="tab-btn" data-tab="tab-audit" onclick="switchTab('tab-audit')">
@@ -185,7 +194,7 @@
           <line x1="16" y1="17" x2="8" y2="17"/>
           <polyline points="10 9 9 9 8 9"/>
         </svg>
-        Audit Log & Phân Tích Lỗi <span class="tab-count badge-rose-subtle" id="tabCountAuditErr">0 Lỗi</span>
+        Audit & lỗi <span class="tab-count badge-rose-subtle" id="tabCountAuditErr">0 Lỗi</span>
       </button>
     </div>
 
@@ -194,37 +203,44 @@
       <div class="panel-card">
         <div class="panel-card-header">
           <div class="header-meta">
-            <h3>Kho Mô Hình Cục Bộ Trong Cache (HM1-23, HM2-01)</h3>
-            <p>Tự động nhận diện các mô hình tải sẵn trong bộ nhớ đệm HuggingFace</p>
+            <h3>Kho mô hình trong cache HuggingFace</h3>
+            <p id="modelsSummary">Đang quét bộ nhớ đệm...</p>
           </div>
           <div class="filter-controls">
-            <input type="text" id="modelSearchInput" class="search-input" placeholder="Tìm theo tên mô hình (Qwen, DeepSeek, AWQ, FP8)..." oninput="filterModelsTable()">
+            <div class="audit-status-filter-group" role="tablist" aria-label="Lọc theo trạng thái">
+              <button type="button" class="filter-chip active" data-model-filter="all" onclick="setModelFilter('all')">Tất cả <span class="chip-count" id="modelCountAll">0</span></button>
+              <button type="button" class="filter-chip chip-emerald" data-model-filter="running" onclick="setModelFilter('running')">Đang chạy <span class="chip-count" id="modelCountRunning">0</span></button>
+              <button type="button" class="filter-chip" data-model-filter="ready" onclick="setModelFilter('ready')">Sẵn sàng <span class="chip-count" id="modelCountReady">0</span></button>
+              <button type="button" class="filter-chip chip-rose" data-model-filter="broken" onclick="setModelFilter('broken')">Thiếu trọng số <span class="chip-count" id="modelCountBroken">0</span></button>
+            </div>
+            <input type="search" id="modelSearchInput" class="search-input" placeholder="Tìm mô hình, container, route..." aria-label="Tìm mô hình" oninput="filterModelsTable()">
             <button class="btn btn-emerald btn-sm" onclick="openAddModelModal()">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
-              Thêm Mô Hình
+              Thêm mô hình
             </button>
             <button class="btn btn-secondary btn-sm" onclick="refreshLocalModels()">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="23 4 23 10 17 10"/>
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
               </svg>
-              Quét Lại
+              Quét lại
             </button>
           </div>
         </div>
 
         <div class="table-container">
-          <table>
+          <table class="models-table">
             <thead>
               <tr>
-                <th>Tên Định Danh Mô Hình</th>
-                <th>Số Tham Số</th>
-                <th>Dung Lượng Đĩa</th>
-                <th>Phân Loại & Kiến Trúc</th>
-                <th style="text-align: right;">Thao Tác</th>
+                <th>Mô hình</th>
+                <th>Trạng thái</th>
+                <th>Tham số</th>
+                <th>Dung lượng</th>
+                <th>Loại</th>
+                <th class="col-actions">Thao tác</th>
               </tr>
             </thead>
             <tbody id="modelsTableBody">
@@ -379,16 +395,19 @@
       <div class="panel-card">
         <div class="panel-card-header">
           <div class="header-meta">
-            <h3>Nhật Ký Thực Thi vLLM (Live Execution Stream - HM2-27)</h3>
-            <p>Theo dõi quá trình nạp trọng số, cấp phát KV cache, và các yêu cầu suy luận</p>
+            <h3>Nhật ký container (HM2-27)</h3>
+            <p>Theo dõi quá trình nạp trọng số, cấp phát KV cache và các yêu cầu suy luận</p>
           </div>
           <div class="header-actions">
+            <select id="logsContainerSelect" class="form-select-sm" aria-label="Chọn container" onchange="refreshLogs()">
+              <option value="qwen">qwen</option>
+            </select>
             <button class="btn btn-secondary btn-sm" onclick="refreshLogs()">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="23 4 23 10 17 10"/>
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
               </svg>
-              Cập Nhật Log
+              Tải lại
             </button>
           </div>
         </div>
@@ -531,12 +550,13 @@
   <div id="switchModal" class="modal-overlay">
     <div class="modal-box">
       <div class="modal-header">
-        <h3>Cấu Hình & Kích Hoạt Mô Hình vLLM (HM2-03, HM2-05)</h3>
+        <h3>Đổi mô hình trên container qwen (HM2-03, HM2-05)</h3>
         <button class="btn btn-secondary btn-sm" onclick="closeSwitchModal()">✕</button>
       </div>
 
       <form id="switchForm">
         <div class="modal-body">
+          <p class="modal-note">Chỉ container <code>qwen</code> chính được nạp lại. Các dịch vụ OCR, embedding, reranker, decision và route LiteLLM của chúng giữ nguyên.</p>
           <div class="form-group">
             <label class="form-label">Mã Mô Hình (Model ID)</label>
             <input type="text" id="switchModelId" class="form-input" required placeholder="Ví dụ: Qwen/Qwen3.8-27B-FP8">
@@ -749,9 +769,24 @@
     </div>
   </div>
 
+  <!-- Deployment detail slide-over -->
+  <div id="deployDrawerBackdrop" class="drawer-backdrop" onclick="closeDeployDrawer()"></div>
+  <aside id="deployDrawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true" inert>
+    <div class="drawer-header">
+      <div>
+        <div class="drawer-kicker" id="drawerKicker">container</div>
+        <h3 id="drawerTitle">--</h3>
+      </div>
+      <button type="button" class="icon-btn" onclick="closeDeployDrawer()" aria-label="Đóng">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
   <!-- Toast Notifications Container -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="/static/app.js?v=20261018_taste_v2"></script>
+  <script src="/static/app.js?v=20261025_drawer"></script>
 </body>
 </html>

@@ -11,6 +11,7 @@ import asyncio
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+from urllib.parse import urlparse
 
 import httpx
 import yaml
@@ -269,6 +270,37 @@ def get_gpu_status() -> List[Dict[str, Any]]:
 
     return gpus
 
+WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".gguf")
+
+def cache_dir_size_bytes(path: Path) -> int:
+    # Snapshots and blobs may be symlinks into a shared Xet store (hub/blobs/xx/...),
+    # so follow file links and count each underlying inode once.
+    seen = set()
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                st = os.stat(os.path.join(root, name))
+            except OSError:
+                continue
+            key = (st.st_dev, st.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            total += st.st_size
+    return total
+
+def cache_weights_state(path: Path) -> str:
+    blobs = path / "blobs"
+    if blobs.exists() and any(b.name.endswith(".incomplete") for b in blobs.iterdir()):
+        return "incomplete"
+    snapshots = path / "snapshots"
+    if snapshots.exists():
+        for f in snapshots.glob("*/**/*"):
+            if f.name.endswith(WEIGHT_SUFFIXES) and f.exists():
+                return "ready"
+    return "no_weights"
+
 def scan_local_models() -> List[Dict[str, Any]]:
     models = []
     if not HF_CACHE_DIR.exists():
@@ -286,23 +318,23 @@ def scan_local_models() -> List[Dict[str, Any]]:
                 author = "local"
                 model_id = repo
 
-            # Calculate size
-            total_size_bytes = 0
-            try:
-                for f in item.glob("**/*"):
-                    if f.is_file() and not f.is_symlink():
-                        total_size_bytes += f.stat().st_size
-            except Exception:
-                pass
-            size_gb = round(total_size_bytes / (1024**3), 2)
+            size_gb = round(cache_dir_size_bytes(item) / (1024**3), 2)
 
             # Determine tags
             tags = []
             name_lower = repo.lower()
-            if "vl" in name_lower or "vision" in name_lower:
+            if "rerank" in name_lower:
+                tags.append("Reranker")
+            elif "embedding" in name_lower:
+                tags.append("Embedding")
+            elif "ocr" in name_lower:
+                tags.append("OCR")
+            elif "vl" in name_lower or "vision" in name_lower:
                 tags.append("Vision-Language")
             elif "asr" in name_lower or "audio" in name_lower:
                 tags.append("Audio / ASR")
+            elif "tts" in name_lower or "codec" in name_lower:
+                tags.append("Audio / TTS")
             else:
                 tags.append("Text")
 
@@ -331,6 +363,7 @@ def scan_local_models() -> List[Dict[str, Any]]:
                 "author": author,
                 "repo_name": repo,
                 "size_gb": size_gb,
+                "weights_state": cache_weights_state(item),
                 "param_size": param_str,
                 "tags": tags,
                 "folder_name": item.name,
@@ -377,7 +410,11 @@ def update_env_file(updates: Dict[str, str]):
     with open(ENV_FILE_PATH, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
-def update_litellm_config(model_id: str):
+def update_litellm_config(model_id: str, previous_model_id: str = ""):
+    """Repoint only the routes served by the primary `qwen` container.
+
+    Routes for OCR, embedding, reranker and decision containers are left untouched.
+    """
     if not LITELLM_CONFIG_PATH.exists():
         return
 
@@ -385,42 +422,30 @@ def update_litellm_config(model_id: str):
         with open(LITELLM_CONFIG_PATH, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
 
-        # Update model list
-        model_name = "qwen-text"
-        is_vl = "vl" in model_id.lower() or "vision" in model_id.lower()
-        if is_vl:
-            model_name = "qwen-vl"
+        model_list = config.get("model_list") or []
+        touched = False
+        for entry in model_list:
+            params = entry.get("litellm_params") or {}
+            if urlparse(str(params.get("api_base", ""))).hostname != "qwen":
+                continue
+            touched = True
+            params["model"] = f"openai/{model_id}"
+            if previous_model_id and entry.get("model_name") == previous_model_id:
+                entry["model_name"] = model_id
 
-        model_list = [
-            {
-                "model_name": model_name,
-                "model_info": {
-                    "supports_function_calling": True,
-                    "supports_vision": is_vl
-                },
-                "litellm_params": {
-                    "model": f"openai/{model_id}",
-                    "api_base": "http://qwen:8000/v1",
-                    "api_key": "EMPTY",
-                    "extra_body": {
-                        "chat_template_kwargs": {
-                            "enable_thinking": False,
-                            "max_tool_calls": 32,
-                            "max_tool_output_tokens": 8192
-                        }
+        if not touched:
+            is_vl = "vl" in model_id.lower() or "vision" in model_id.lower()
+            for name in (model_id, "default"):
+                model_list.append({
+                    "model_name": name,
+                    "model_info": {"supports_function_calling": True, "supports_vision": is_vl},
+                    "litellm_params": {
+                        "model": f"openai/{model_id}",
+                        "api_base": "http://qwen:8000/v1",
+                        "api_key": "EMPTY",
+                        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}
                     }
-                }
-            },
-            # Keep secondary alias
-            {
-                "model_name": "default",
-                "litellm_params": {
-                    "model": f"openai/{model_id}",
-                    "api_base": "http://qwen:8000/v1",
-                    "api_key": "EMPTY"
-                }
-            }
-        ]
+                })
         config["model_list"] = model_list
 
         with open(LITELLM_CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -476,6 +501,129 @@ def get_container_info(container_name: str) -> Dict[str, Any]:
             "args": []
         }
 
+PRIMARY_CONTAINER = "qwen"
+GATEWAY_CONTAINER = "vllm-litellm"
+_deployments_cache: Dict[str, Any] = {"at": 0.0, "data": []}
+SECRET_ENV_PATTERN = re.compile(r"TOKEN|KEY|SECRET|PASSWORD|PASS|CREDENTIAL", re.IGNORECASE)
+NOISY_ENV_KEYS = {"PATH", "HOME", "HOSTNAME", "LANG", "LC_ALL", "TERM", "LD_LIBRARY_PATH", "PYTHONPATH",
+                  "NVIDIA_REQUIRE_CUDA", "NV_LIBCUBLAS_VERSION", "NV_CUDA_LIB_VERSION"}
+
+def _arg_value(args: List[str], flag: str) -> Optional[str]:
+    for i, a in enumerate(args):
+        if a == flag and i + 1 < len(args):
+            return args[i + 1]
+        if a.startswith(flag + "="):
+            return a.split("=", 1)[1]
+    return None
+
+def _arg_values(args: List[str], flag: str) -> List[str]:
+    for i, a in enumerate(args):
+        if a == flag:
+            vals = []
+            for v in args[i + 1:]:
+                if v.startswith("--"):
+                    break
+                vals.append(v)
+            return vals
+    return []
+
+def _deployment_role(model_id: str, args: List[str], container: str) -> str:
+    name = model_id.lower()
+    pooling = _arg_value(args, "--runner") == "pooling" or _arg_value(args, "--task") in ("embed", "score")
+    if "rerank" in name:
+        return "rerank"
+    if pooling or "embedding" in name:
+        return "embedding"
+    if "ocr" in name:
+        return "ocr"
+    if "asr" in name or "whisper" in name:
+        return "asr"
+    if "decision" in container.lower() or any("decision" in n for n in _arg_values(args, "--served-model-name")):
+        return "decision"
+    return "chat"
+
+def litellm_routes_by_host() -> Dict[str, List[str]]:
+    routes: Dict[str, List[str]] = {}
+    if not LITELLM_CONFIG_PATH.exists():
+        return routes
+    try:
+        with open(LITELLM_CONFIG_PATH, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        for entry in config.get("model_list") or []:
+            host = urlparse(str((entry.get("litellm_params") or {}).get("api_base", ""))).hostname
+            if host and entry.get("model_name"):
+                routes.setdefault(host, []).append(str(entry["model_name"]))
+    except Exception as e:
+        logger.error(f"Failed to read litellm routes: {e}")
+    return routes
+
+def discover_deployments(max_age: float = 2.0) -> List[Dict[str, Any]]:
+    """Every vLLM serving container on this Docker host (running or not), with its LiteLLM routes."""
+    now = time.time()
+    if now - _deployments_cache["at"] < max_age:
+        return _deployments_cache["data"]
+
+    names = run_command(["docker", "ps", "-a", "--format", "{{.Names}}"]).split()
+    raw = run_command(["docker", "inspect", *names], timeout=20) if names else ""
+    try:
+        containers = json.loads(raw) if raw else []
+    except json.JSONDecodeError:
+        containers = []
+
+    routes = litellm_routes_by_host()
+    deployments = []
+    for c in containers:
+        args = c.get("Args") or []
+        model_id = _arg_value(args, "--model")
+        if not model_id:
+            continue
+        name = (c.get("Name") or "").lstrip("/")
+        state = c.get("State") or {}
+        env = dict(e.split("=", 1) for e in (c.get("Config") or {}).get("Env", []) if "=" in e)
+        labels = (c.get("Config") or {}).get("Labels") or {}
+        service = labels.get("com.docker.compose.service", name)
+        ports = ((c.get("HostConfig") or {}).get("PortBindings") or {}).get("8000/tcp") or []
+        host_port = ports[0].get("HostPort") if ports else None
+        gpu_uuids = [u.strip() for u in env.get("NVIDIA_VISIBLE_DEVICES", "").split(",") if u.strip().startswith("GPU-")]
+
+        deployments.append({
+            "container": name,
+            "service": service,
+            "model_id": model_id,
+            "served_names": _arg_values(args, "--served-model-name") or [model_id],
+            "litellm_routes": sorted(set(routes.get(name, []) + routes.get(service, []))),
+            "role": _deployment_role(model_id, args, name),
+            "is_primary": name == PRIMARY_CONTAINER,
+            "status": state.get("Status", "unknown"),
+            "running": bool(state.get("Running")),
+            "health": (state.get("Health") or {}).get("Status", "n/a"),
+            "exit_code": state.get("ExitCode"),
+            "started_at": state.get("StartedAt", ""),
+            "image": (c.get("Config") or {}).get("Image", ""),
+            "gpu_uuids": gpu_uuids,
+            "host_port": host_port,
+            "tensor_parallel_size": int(_arg_value(args, "--tensor-parallel-size") or 1),
+            "gpu_memory_utilization": float(_arg_value(args, "--gpu-memory-utilization") or 0),
+            "max_model_len": int(_arg_value(args, "--max-model-len") or 0),
+            "args": args,
+            "env": {
+                k: ("••••••" if SECRET_ENV_PATTERN.search(k) else v)
+                for k, v in sorted(env.items())
+                if k not in NOISY_ENV_KEYS
+            },
+            "mounts": [
+                {"source": m.get("Source", ""), "target": m.get("Destination", ""), "rw": bool(m.get("RW"))}
+                for m in c.get("Mounts") or []
+            ],
+            "restart_policy": ((c.get("HostConfig") or {}).get("RestartPolicy") or {}).get("Name", ""),
+            "shm_size_gb": round(((c.get("HostConfig") or {}).get("ShmSize") or 0) / 1024**3, 1),
+            "ipc_mode": (c.get("HostConfig") or {}).get("IpcMode", ""),
+        })
+
+    deployments.sort(key=lambda d: (not d["is_primary"], not d["running"], d["container"]))
+    _deployments_cache.update(at=now, data=deployments)
+    return deployments
+
 # API Endpoints
 @app.get("/api/health")
 async def health_check():
@@ -499,15 +647,34 @@ async def api_models_local():
     models = scan_local_models()
     env = read_current_env()
     current_model = env.get("MODEL_ID", "")
+    deployments = discover_deployments()
 
     for m in models:
-        m["is_active"] = (m["model_id"] == current_model)
+        m["deployments"] = [
+            {k: d[k] for k in ("container", "running", "health", "role", "is_primary", "litellm_routes")}
+            for d in deployments if d["model_id"] == m["model_id"]
+        ]
+        m["is_active"] = any(d["running"] for d in m["deployments"])
 
     return {
         "models": models,
         "count": len(models),
         "current_active_model": current_model,
+        "active_count": sum(1 for m in models if m["is_active"]),
         "cache_dir": str(HF_CACHE_DIR)
+    }
+
+@app.get("/api/deployments")
+async def api_deployments():
+    deployments = discover_deployments()
+    gateway = get_container_info(GATEWAY_CONTAINER)
+    return {
+        "deployments": deployments,
+        "running": sum(1 for d in deployments if d["running"]),
+        "healthy": sum(1 for d in deployments if d["running"] and d["health"] in ("healthy", "n/a")),
+        "total": len(deployments),
+        "gateway": {k: gateway.get(k) for k in ("name", "status", "running", "health", "started_at")},
+        "gateway_routes": sum(len(d["litellm_routes"]) for d in deployments),
     }
 
 active_downloads: Dict[str, Dict[str, Any]] = {}
@@ -521,6 +688,13 @@ async def api_delete_model(req: DeleteModelRequest):
         raise HTTPException(
             status_code=400,
             detail=f"Không thể xóa mô hình '{req.model_id}' vì đang là mô hình hoạt động chính của cụm vLLM. Vui lòng chuyển sang mô hình khác trước khi xóa."
+        )
+
+    users = [d["container"] for d in discover_deployments(max_age=0) if d["model_id"] == req.model_id.strip()]
+    if users:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể xóa '{req.model_id}' vì container {', '.join(users)} đang được cấu hình để phục vụ mô hình này."
         )
 
     if not HF_CACHE_DIR.exists():
@@ -693,6 +867,7 @@ async def api_instance_action(req: ContainerActionRequest):
     logger.info(f"Triggering action '{req.action}' on container '{req.target}'")
     cmd = ["docker", req.action, req.target]
     out = run_command(cmd, timeout=30)
+    _deployments_cache["at"] = 0.0
     return {
         "success": True,
         "action": req.action,
@@ -713,6 +888,7 @@ async def api_instance_switch(req: SwitchModelRequest, background_tasks: Backgro
         selected_uuids = [GPU_UUID_MAP[0], GPU_UUID_MAP[2]]
 
     gpu_devices_str = ",".join(selected_uuids)
+    previous_model_id = read_current_env().get("MODEL_ID", "")
 
     # Update .env
     updates = {
@@ -725,7 +901,7 @@ async def api_instance_switch(req: SwitchModelRequest, background_tasks: Backgro
     update_env_file(updates)
 
     # Update litellm_config.yaml
-    update_litellm_config(req.model_id)
+    update_litellm_config(req.model_id, previous_model_id)
 
     # Restart qwen container using docker compose or direct docker command
     def do_restart():
@@ -746,10 +922,13 @@ async def api_instance_switch(req: SwitchModelRequest, background_tasks: Backgro
     }
 
 @app.get("/api/instance/logs")
-async def api_instance_logs(tail: int = 100):
-    cmd = ["docker", "logs", "--tail", str(min(tail, 500)), "qwen"]
+async def api_instance_logs(tail: int = 100, container: str = PRIMARY_CONTAINER):
+    allowed = {d["container"] for d in discover_deployments()} | {PRIMARY_CONTAINER, GATEWAY_CONTAINER}
+    if container not in allowed:
+        raise HTTPException(status_code=400, detail=f"Container '{container}' không thuộc cụm vLLM")
+    cmd = ["docker", "logs", "--tail", str(min(tail, 500)), container]
     raw = run_command(cmd, timeout=10)
-    return {"logs": raw}
+    return {"logs": raw, "container": container}
 
 def parse_error_cause_details(exception_str: str) -> dict:
     err_lower = (exception_str or "").lower()

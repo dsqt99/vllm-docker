@@ -57,6 +57,7 @@ function configureApiKey() {
 const API = {
   gpuStatus: '/api/gpu/status',
   instanceStatus: '/api/instance/status',
+  deployments: '/api/deployments',
   modelsLocal: '/api/models/local',
   modelDelete: '/api/models/delete',
   modelImport: '/api/models/import',
@@ -77,6 +78,8 @@ const state = {
   gpus: [],
   models: [],
   instance: null,
+  deployments: [],
+  modelFilter: 'all',
   currentModel: '',
   isChatStreaming: false,
   chatHistory: [],
@@ -163,11 +166,217 @@ function clearChat() {
 // Live Filter Models Table
 function filterModelsTable() {
   const query = (document.getElementById('modelSearchInput')?.value || '').toLowerCase().trim();
-  const rows = document.querySelectorAll('#modelsTableBody tr');
+  const rows = document.querySelectorAll('#modelsTableBody tr[data-state]');
   rows.forEach(row => {
-    const text = row.textContent.toLowerCase();
-    row.style.display = text.includes(query) ? '' : 'none';
+    const matchesState = state.modelFilter === 'all' || row.dataset.state === state.modelFilter;
+    const matchesQuery = row.textContent.toLowerCase().includes(query);
+    row.style.display = matchesState && matchesQuery ? '' : 'none';
   });
+}
+
+function setModelFilter(filter) {
+  state.modelFilter = filter;
+  document.querySelectorAll('[data-model-filter]').forEach(btn => {
+    const active = btn.dataset.modelFilter === filter;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  filterModelsTable();
+}
+
+// ---- Deployments (every vLLM container, not just the primary one)
+const ROLE_LABELS = {
+  chat: 'LLM',
+  decision: 'Decision',
+  ocr: 'OCR',
+  embedding: 'Embedding',
+  rerank: 'Reranker',
+  asr: 'ASR'
+};
+
+function deploymentHealth(d) {
+  if (!d.running) return { cls: 'down', label: d.status === 'exited' ? `Đã dừng (exit ${d.exit_code ?? '?'})` : 'Không chạy' };
+  if (d.health === 'healthy' || d.health === 'n/a') return { cls: 'ok', label: 'Healthy' };
+  if (d.health === 'starting') return { cls: 'warn', label: 'Đang nạp trọng số' };
+  return { cls: 'warn', label: d.health };
+}
+
+function formatUptime(startedAt) {
+  const t = Date.parse(startedAt || '');
+  if (!t) return '';
+  const mins = Math.max(0, Math.floor((Date.now() - t) / 60000));
+  if (mins < 60) return `${mins} phút`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours} giờ`;
+  return `${Math.floor(hours / 24)} ngày`;
+}
+
+function gpuLabelsFor(uuids) {
+  return (uuids || []).map(u => {
+    const gpu = state.gpus.find(g => (g.uuid || '').toLowerCase() === u.toLowerCase());
+    return gpu ? `GPU ${gpu.index}` : u.substring(4, 12);
+  });
+}
+
+async function refreshDeployments() {
+  try {
+    const res = await fetch(API.deployments);
+    if (!res.ok) return;
+    const data = await res.json();
+    state.deployments = data.deployments || [];
+    renderDeployments(state.deployments);
+    updateServingSummary(data);
+    updateLogsContainerOptions(state.deployments);
+    if (state.gpus.length) renderGpuGrid(state.gpus);
+  } catch (err) {
+    console.error('Lỗi nạp danh sách dịch vụ:', err);
+  }
+}
+
+function updateServingSummary(data) {
+  const running = data.running || 0;
+  const total = data.total || 0;
+  const healthy = data.healthy || 0;
+  const primary = state.deployments.find(d => d.is_primary);
+
+  const summary = document.getElementById('servingSummary');
+  if (summary) summary.textContent = `${running} / ${total} dịch vụ`;
+
+  const statusBadge = document.getElementById('engineStatusBadge');
+  if (statusBadge) {
+    let cls = 'badge-emerald', text = 'Online';
+    if (running === 0) { cls = 'badge-rose'; text = 'Stopped'; }
+    else if (healthy < running) { cls = 'badge-amber'; text = 'Đang nạp...'; }
+    else if (running < total) { cls = 'badge-amber'; text = `${total - running} đã dừng`; }
+    statusBadge.className = `badge ${cls}`;
+    statusBadge.innerHTML = `<span class="dot-pulse"></span> ${escapeHtml(text)}`;
+  }
+
+  const val = document.getElementById('bentoServingVal');
+  if (val) val.textContent = `${running} / ${total}`;
+  const badge = document.getElementById('bentoServingBadge');
+  if (badge) {
+    badge.textContent = `${healthy} healthy`;
+    badge.className = `badge ${healthy === total ? 'badge-emerald' : 'badge-amber'}`;
+  }
+  const sub = document.getElementById('bentoServingSub');
+  if (sub) {
+    sub.textContent = primary
+      ? `Chính: ${primary.model_id.split('/').pop()} · TP ${primary.tensor_parallel_size}`
+      : 'Không tìm thấy container qwen chính';
+  }
+
+  const gwBadge = document.getElementById('bentoGatewayBadge');
+  const gw = data.gateway || {};
+  if (gwBadge) {
+    gwBadge.textContent = gw.running ? 'Online' : (gw.status || 'Không chạy');
+    gwBadge.className = `badge ${gw.running ? 'badge-emerald' : 'badge-rose'}`;
+  }
+  const gwVal = document.getElementById('bentoGatewayVal');
+  if (gwVal) gwVal.textContent = `${data.gateway_routes || 0} route`;
+}
+
+function renderDeployments(deployments) {
+  const list = document.getElementById('deployList');
+  if (!list) return;
+  list.replaceChildren();
+
+  if (deployments.length === 0) {
+    list.innerHTML = '<div class="deploy-empty">Không tìm thấy container vLLM nào. Kiểm tra quyền truy cập docker.sock của vllm-manager.</div>';
+    return;
+  }
+
+  deployments.forEach(d => {
+    const h = deploymentHealth(d);
+    const row = document.createElement('div');
+    row.className = `deploy-row is-${h.cls}`;
+    row.setAttribute('role', 'listitem');
+
+    const routes = d.litellm_routes || [];
+    const shownRoutes = routes.slice(0, 2).map(r => `<code class="route-chip">${escapeHtml(r)}</code>`).join('');
+    const extraRoutes = routes.length > 2
+      ? `<span class="route-more" title="${escapeHtml(routes.slice(2).join(', '))}">+${routes.length - 2}</span>` : '';
+    const gpus = gpuLabelsFor(d.gpu_uuids).map(g => `<span class="gpu-chip">${escapeHtml(g)}</span>`).join('');
+    const uptime = d.running ? formatUptime(d.started_at) : '';
+    const ctx = d.max_model_len ? `${Math.round(d.max_model_len / 1024)}K ctx` : '';
+
+    row.innerHTML = `
+      <div class="deploy-main">
+        <span class="status-dot ${h.cls}" aria-hidden="true"></span>
+        <button type="button" class="deploy-name deploy-open" title="Xem cấu hình triển khai">
+          <div class="deploy-model">
+            ${escapeHtml(d.model_id.split('/').pop())}
+            ${d.is_primary ? '<span class="primary-flag">Chính</span>' : ''}
+          </div>
+          <div class="deploy-meta">
+            <span class="mono">${escapeHtml(d.container)}</span>
+            <span class="sep">·</span>
+            <span class="role-label">${escapeHtml(ROLE_LABELS[d.role] || d.role)}</span>
+            ${ctx ? `<span class="sep">·</span><span class="mono">${ctx}</span>` : ''}
+          </div>
+        </button>
+      </div>
+      <div class="deploy-health">
+        <span class="health-text ${h.cls}">${escapeHtml(h.label)}</span>
+        ${uptime ? `<span class="deploy-uptime">${uptime}</span>` : ''}
+      </div>
+      <div class="deploy-gpus">${gpus || '<span class="muted">--</span>'}${d.host_port ? `<span class="port-chip">:${escapeHtml(d.host_port)}</span>` : ''}</div>
+      <div class="deploy-routes">${shownRoutes}${extraRoutes}${routes.length === 0 ? '<span class="muted">Chưa có route</span>' : ''}</div>
+      <div class="deploy-actions">
+        <button type="button" class="icon-btn" data-act="logs" title="Xem nhật ký" aria-label="Xem nhật ký ${escapeHtml(d.container)}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </button>
+        ${d.running ? `
+        <button type="button" class="icon-btn" data-act="restart" title="Khởi động lại" aria-label="Khởi động lại ${escapeHtml(d.container)}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
+        <button type="button" class="icon-btn danger" data-act="stop" title="Dừng" aria-label="Dừng ${escapeHtml(d.container)}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+        </button>` : `
+        <button type="button" class="btn btn-secondary btn-sm" data-act="start" aria-label="Bật ${escapeHtml(d.container)}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          Bật
+        </button>`}
+      </div>
+    `;
+
+    row.querySelector('.deploy-open').addEventListener('click', () => openDeployDrawer(d.container));
+    row.querySelector('[data-act="logs"]').addEventListener('click', () => openLogsFor(d.container));
+    row.querySelectorAll('[data-act="restart"],[data-act="stop"],[data-act="start"]').forEach(btn => {
+      btn.addEventListener('click', () => handleContainerAction(btn.dataset.act, d.container));
+    });
+    list.appendChild(row);
+  });
+}
+
+function updateLogsContainerOptions(deployments) {
+  const select = document.getElementById('logsContainerSelect');
+  if (!select) return;
+  const names = [...deployments.map(d => d.container), 'vllm-litellm'];
+  const current = Array.from(select.options).map(o => o.value).join('|');
+  if (current === names.join('|')) return;
+  const selected = select.value;
+  select.replaceChildren(...names.map(n => {
+    const opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = n;
+    return opt;
+  }));
+  if (names.includes(selected)) select.value = selected;
+}
+
+function openLogsFor(container) {
+  const select = document.getElementById('logsContainerSelect');
+  if (select) {
+    if (![...select.options].some(o => o.value === container)) {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = container;
+      select.appendChild(opt);
+    }
+    select.value = container;
+  }
+  switchTab('tab-logs');
+  document.getElementById('tab-logs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // Fetch GPU Telemetry
@@ -221,15 +430,12 @@ function renderGpuGrid(gpus) {
   if (!container) return;
   container.replaceChildren();
 
-  const activeGpuDevices = (state.instance?.config?.gpu_devices || '').toLowerCase();
-
   gpus.forEach((gpu) => {
     const gpuUuidLower = (gpu.uuid || '').toLowerCase();
-    const isVllmAssigned = activeGpuDevices.includes(gpuUuidLower);
-    const hasVllmProc = gpu.processes && gpu.processes.some(p => 
-      p.name.toLowerCase().includes('vllm')
+    const onGpu = state.deployments.filter(d =>
+      d.running && (d.gpu_uuids || []).some(u => u.toLowerCase() === gpuUuidLower)
     );
-    const isWorker = isVllmAssigned || hasVllmProc;
+    const isWorker = onGpu.length > 0;
     const isOtherBusy = gpu.memory_used_mb > 1500 && !isWorker;
 
     const card = document.createElement('div');
@@ -242,13 +448,13 @@ function renderGpuGrid(gpus) {
     else barColor = 'fill-emerald';
 
     let badgeClass = 'badge-emerald';
-    let badgeText = 'Idle Standby';
+    let badgeText = 'Rảnh';
     if (isWorker) {
       badgeClass = 'badge-cyan';
-      badgeText = 'vLLM Active';
+      badgeText = `${onGpu.length} dịch vụ`;
     } else if (isOtherBusy) {
       badgeClass = 'badge-amber';
-      badgeText = gpu.uuid === 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3' ? 'Embedding & Reranker' : 'Busy (Other)';
+      badgeText = 'Tiến trình khác';
     }
 
     const header = document.createElement('div');
@@ -315,6 +521,16 @@ function renderGpuGrid(gpus) {
     card.appendChild(barGroup);
     card.appendChild(statsRow);
 
+    if (isWorker) {
+      const tenants = document.createElement('div');
+      tenants.className = 'gpu-tenants';
+      tenants.innerHTML = onGpu.map(d => {
+        const share = d.gpu_memory_utilization ? ` ${Math.round(d.gpu_memory_utilization * 100)}%` : '';
+        return `<span class="tenant-chip" title="${escapeHtml(d.model_id)}">${escapeHtml(d.container)}<b>${share}</b></span>`;
+      }).join('');
+      card.appendChild(tenants);
+    }
+
     container.appendChild(card);
   });
 }
@@ -328,43 +544,8 @@ async function refreshInstanceStatus() {
     state.instance = data;
     state.currentModel = data.config?.model_id || 'Qwen/Qwen3.8-27B-FP8';
 
-    const statusBadge = document.getElementById('engineStatusBadge');
-    const modelBadge = document.getElementById('currentModelBadge');
-    const bentoModelName = document.getElementById('bentoModelName');
-    const bentoModelSub = document.getElementById('bentoModelSub');
-    const metricTpBadge = document.getElementById('metricTpBadge');
     const bentoCtxBadge = document.getElementById('bentoCtxBadge');
     const bentoCtxVal = document.getElementById('bentoCtxVal');
-
-    if (data.qwen?.running) {
-      if (data.qwen?.health === 'healthy') {
-        statusBadge.className = 'badge badge-emerald';
-        statusBadge.innerHTML = '<span class="dot-pulse"></span> Online';
-      } else {
-        statusBadge.className = 'badge badge-amber';
-        statusBadge.innerHTML = '<span class="dot-pulse"></span> Loading Weights...';
-      }
-    } else {
-      statusBadge.className = 'badge badge-rose';
-      statusBadge.innerHTML = '<span class="dot-pulse"></span> Stopped';
-    }
-
-    if (modelBadge) {
-      modelBadge.textContent = state.currentModel;
-    }
-
-    if (bentoModelName) {
-      const parts = state.currentModel.split('/');
-      bentoModelName.textContent = parts[parts.length - 1];
-    }
-
-    if (bentoModelSub) {
-      bentoModelSub.textContent = `PagedAttention / TP = ${data.config?.tensor_parallel_size || 2}`;
-    }
-
-    if (metricTpBadge && data.config?.tensor_parallel_size) {
-      metricTpBadge.textContent = `TP = ${data.config.tensor_parallel_size}`;
-    }
 
     if (data.config?.max_model_len) {
       const len = data.config.max_model_len;
@@ -383,15 +564,37 @@ async function refreshLocalModels() {
     if (!res.ok) return;
     const data = await res.json();
     state.models = data.models || [];
-    renderModelsTable(state.models, data.current_active_model);
+    renderModelsTable(state.models);
   } catch (err) {
     console.error('Lỗi nạp danh mục model:', err);
   }
 }
 
-function renderModelsTable(models, activeModel) {
+function modelRowState(m) {
+  if (m.is_active) return 'running';
+  if (m.weights_state && m.weights_state !== 'ready') return 'broken';
+  return 'ready';
+}
+
+const MODEL_STATE_ORDER = { running: 0, ready: 1, broken: 2 };
+
+function renderModelsTable(models) {
   const countBadge = document.getElementById('tabCountModels');
   if (countBadge) countBadge.textContent = models.length;
+
+  const counts = { all: models.length, running: 0, ready: 0, broken: 0 };
+  models.forEach(m => counts[modelRowState(m)]++);
+  const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+  setCount('modelCountAll', counts.all);
+  setCount('modelCountRunning', counts.running);
+  setCount('modelCountReady', counts.ready);
+  setCount('modelCountBroken', counts.broken);
+
+  const totalGb = models.reduce((sum, m) => sum + (m.size_gb || 0), 0);
+  const summary = document.getElementById('modelsSummary');
+  if (summary) {
+    summary.textContent = `${models.length} mô hình · ${totalGb.toFixed(1)} GB trên đĩa · ${counts.running} đang được container vLLM phục vụ`;
+  }
 
   const tbody = document.getElementById('modelsTableBody');
   if (!tbody) return;
@@ -399,60 +602,104 @@ function renderModelsTable(models, activeModel) {
 
   if (models.length === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="5" style="text-align: center; color: var(--text-dim); padding: 2rem;">Không tìm thấy model nào trong cache local.</td>';
+    tr.innerHTML = '<td colspan="6" class="table-empty">Không tìm thấy mô hình nào trong cache local. Dùng "Thêm mô hình" để nhập hoặc tải về.</td>';
     tbody.appendChild(tr);
     return;
   }
 
-  models.forEach((m) => {
+  const sorted = [...models].sort((a, b) =>
+    MODEL_STATE_ORDER[modelRowState(a)] - MODEL_STATE_ORDER[modelRowState(b)] ||
+    a.repo_name.localeCompare(b.repo_name)
+  );
+
+  sorted.forEach((m) => {
+    const rowState = modelRowState(m);
     const tr = document.createElement('tr');
-    const isActive = (m.model_id === activeModel);
+    tr.dataset.state = rowState;
+    if (rowState === 'running') tr.classList.add('row-running');
 
     const tagsHtml = m.tags.map(t => {
       let colorClass = 'badge-cyan';
-      if (t === 'Vision-Language') colorClass = 'badge-amber';
-      else if (t === 'FP8' || t === 'AWQ') colorClass = 'badge-green';
-      return `<span class="badge ${colorClass}" style="font-size: 0.7rem; padding: 0.12rem 0.45rem;">${escapeHtml(t)}</span>`;
+      if (t === 'Vision-Language' || t === 'OCR') colorClass = 'badge-amber';
+      else if (['FP8', 'AWQ', 'INT4', 'FP4'].includes(t)) colorClass = 'badge-green';
+      return `<span class="badge badge-tag ${colorClass}">${escapeHtml(t)}</span>`;
     }).join(' ');
 
     const safeModelId = escapeHtml(m.model_id);
     const safeRepoName = escapeHtml(m.repo_name);
     const safeParam = escapeHtml(m.param_size);
+    const deps = m.deployments || [];
+
+    let statusHtml;
+    if (deps.length) {
+      statusHtml = deps.map(d => {
+        const h = deploymentHealth(d);
+        return `<button type="button" class="serving-chip ${h.cls}" data-container="${escapeHtml(d.container)}" title="${escapeHtml(h.label)} · route: ${escapeHtml((d.litellm_routes || []).join(', ') || 'không có')}">
+          <span class="status-dot ${h.cls}" aria-hidden="true"></span>${escapeHtml(d.container)}${d.is_primary ? ' <em>chính</em>' : ''}
+        </button>`;
+      }).join('');
+    } else if (rowState === 'broken') {
+      statusHtml = `<span class="model-state broken">${m.weights_state === 'incomplete' ? 'Tải dở dang' : 'Chưa có trọng số'}</span>`;
+    } else {
+      statusHtml = '<span class="model-state ready">Sẵn sàng nạp</span>';
+    }
+
+    const deleteBtn = `
+      <button class="icon-btn danger btn-delete-model" title="Xóa khỏi ổ cứng" aria-label="Xóa ${safeRepoName}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+      </button>`;
+
+    let actionsHtml;
+    if (deps.length) {
+      actionsHtml = `<button class="btn btn-secondary btn-sm" data-container="${escapeHtml(deps[0].container)}">Cấu hình</button>`;
+    } else if (rowState === 'broken') {
+      actionsHtml = `<button class="btn btn-secondary btn-sm btn-redownload">Tải lại</button>${deleteBtn}`;
+    } else {
+      actionsHtml = `<button class="btn btn-primary btn-sm btn-switch" title="Nạp mô hình này vào container qwen chính">Nạp vào qwen</button>${deleteBtn}`;
+    }
 
     tr.innerHTML = `
       <td>
-        <div style="font-weight: 600; color: #fff;">${safeRepoName}</div>
-        <div style="font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono);">${safeModelId}</div>
+        ${deps.length
+          ? `<button type="button" class="model-name model-open" data-container="${escapeHtml(deps[0].container)}" title="Xem cấu hình triển khai">${safeRepoName}</button>`
+          : `<div class="model-name">${safeRepoName}</div>`}
+        <div class="model-id">${safeModelId}</div>
       </td>
-      <td><span style="font-weight: 600; color: var(--accent);">${safeParam}</span></td>
-      <td>${m.size_gb} GB</td>
-      <td>${tagsHtml}</td>
-      <td style="text-align: right; white-space: nowrap;">
-        ${isActive 
-          ? '<span class="badge badge-green">Đang Kích Hoạt</span>' 
-          : `
-            <button class="btn btn-primary btn-sm btn-switch" data-model="${safeModelId}">Kích Hoạt</button>
-            <button class="btn btn-danger btn-sm btn-delete-model" data-model="${safeModelId}" data-name="${safeRepoName}" data-size="${m.size_gb}" title="Xóa mô hình khỏi ổ cứng">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-              </svg>
-              Xóa
-            </button>
-          `
-        }
-      </td>
+      <td><div class="model-status">${statusHtml}</div></td>
+      <td><span class="model-param">${safeParam}</span></td>
+      <td class="${m.size_gb ? '' : 'muted'}">${m.size_gb} GB</td>
+      <td><div class="tag-row">${tagsHtml}</div></td>
+      <td class="col-actions"><div class="row-actions">${actionsHtml}</div></td>
     `;
-    const switchBtn = tr.querySelector('.btn-switch');
-    if (switchBtn) {
-      switchBtn.addEventListener('click', () => openSwitchModal(m.model_id));
-    }
-    const delBtn = tr.querySelector('.btn-delete-model');
-    if (delBtn) {
-      delBtn.addEventListener('click', () => deleteModel(m.model_id, m.repo_name, m.size_gb));
-    }
+
+    tr.querySelector('.btn-switch')?.addEventListener('click', () => openSwitchModal(m.model_id));
+    tr.querySelector('.btn-delete-model')?.addEventListener('click', () => deleteModel(m.model_id, m.repo_name, m.size_gb));
+    tr.querySelector('.btn-redownload')?.addEventListener('click', () => redownloadModel(m.model_id));
+    tr.querySelectorAll('[data-container]').forEach(el => {
+      el.addEventListener('click', () => openDeployDrawer(el.dataset.container));
+    });
     tbody.appendChild(tr);
   });
+
+  filterModelsTable();
+}
+
+async function redownloadModel(modelId) {
+  if (!confirm(`Tải lại '${modelId}' từ HuggingFace? Máy chủ cần có kết nối mạng ra ngoài.`)) return;
+  try {
+    const res = await fetch(API.modelDownload, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_id: modelId })
+    });
+    const data = await res.json();
+    showToast(res.ok ? (data.message || `Đang tải ${modelId}`) : (data.detail || 'Không thể bắt đầu tải'), res.ok ? 'info' : 'error');
+  } catch (err) {
+    showToast('Lỗi gửi yêu cầu tải: ' + err.message, 'error');
+  }
 }
 
 // Model Deletion
@@ -667,7 +914,8 @@ async function refreshLogs() {
   if (!viewer) return;
 
   try {
-    const res = await fetch(`${API.instanceLogs}?tail=80`);
+    const container = document.getElementById('logsContainerSelect')?.value || 'qwen';
+    const res = await fetch(`${API.instanceLogs}?tail=200&container=${encodeURIComponent(container)}`);
     if (!res.ok) return;
     const data = await res.json();
     viewer.textContent = data.logs || 'Chưa có nhật ký ghi nhận.';
@@ -692,7 +940,7 @@ async function handleContainerAction(action, target) {
     const data = await res.json();
     if (data.success) {
       showToast(`Thao tác ${action} hoàn tất`, 'success');
-      setTimeout(refreshInstanceStatus, 1600);
+      setTimeout(() => { refreshDeployments(); refreshLocalModels(); }, 1600);
     }
   } catch (err) {
     showToast('Lỗi thực thi: ' + err.message, 'error');
@@ -1238,6 +1486,7 @@ async function clearAuditLogs() {
 document.addEventListener('DOMContentLoaded', () => {
   refreshGpuStatus();
   refreshInstanceStatus();
+  refreshDeployments();
   refreshLocalModels();
   refreshLoraAdapters();
   refreshLogs();
@@ -1245,13 +1494,178 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 3.5s Polling for real-time telemetry
   setInterval(() => {
+    if (document.hidden) return;
     refreshGpuStatus();
     refreshInstanceStatus();
+    refreshDeployments();
   }, 3500);
+
+  // Model catalog status follows container state, but the disk scan is heavier
+  setInterval(() => {
+    if (!document.hidden) refreshLocalModels();
+  }, 15000);
 
   // Bind Form Switcher
   const switchForm = document.getElementById('switchForm');
   if (switchForm) {
     switchForm.addEventListener('submit', submitModelSwitch);
   }
+});
+
+// ---- Deployment detail drawer
+function parseVllmArgs(args) {
+  const out = [];
+  (args || []).forEach(a => {
+    if (a.startsWith('--')) {
+      const [flag, ...rest] = a.split('=');
+      out.push({ flag, value: rest.join('=') });
+    } else if (out.length) {
+      const last = out[out.length - 1];
+      last.value = last.value ? `${last.value} ${a}` : a;
+    } else {
+      out.push({ flag: '', value: a });
+    }
+  });
+  return out;
+}
+
+function kvRows(rows) {
+  return rows.map(([k, v]) => `
+    <div class="kv-row"><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join('');
+}
+
+function openDeployDrawer(container) {
+  const d = state.deployments.find(x => x.container === container);
+  if (!d) {
+    showToast(`Chưa có thông tin container ${container}`, 'error');
+    return;
+  }
+  const h = deploymentHealth(d);
+  const flags = parseVllmArgs(d.args);
+  const flagValue = f => flags.find(x => x.flag === f)?.value;
+  const gpuRows = (d.gpu_uuids || []).map(u => {
+    const gpu = state.gpus.find(g => (g.uuid || '').toLowerCase() === u.toLowerCase());
+    return `<div class="gpu-line"><span class="gpu-chip">${gpu ? `GPU ${gpu.index}` : 'GPU ?'}</span><code>${escapeHtml(u)}</code></div>`;
+  }).join('') || '<span class="muted">Không giới hạn GPU</span>';
+  const vramGb = d.gpu_memory_utilization ? (d.gpu_memory_utilization * 24 * (d.tensor_parallel_size || 1)).toFixed(1) : null;
+  const routes = d.litellm_routes || [];
+  const mono = v => `<code>${escapeHtml(v ?? '--')}</code>`;
+  const serveCmd = `vllm serve ${(d.args || []).map(a => /\s/.test(a) ? `'${a}'` : a).join(' ')}`;
+
+  document.getElementById('drawerKicker').textContent = `${d.container} · ${ROLE_LABELS[d.role] || d.role}${d.is_primary ? ' · chính' : ''}`;
+  document.getElementById('drawerTitle').textContent = d.model_id;
+
+  document.getElementById('drawerBody').innerHTML = `
+    <div class="drawer-status ${h.cls}">
+      <span class="status-dot ${h.cls}" aria-hidden="true"></span>
+      <strong>${escapeHtml(h.label)}</strong>
+      ${d.running ? `<span>chạy ${escapeHtml(formatUptime(d.started_at))}</span>` : ''}
+    </div>
+
+    <section class="drawer-section">
+      <h4>Phục vụ</h4>
+      <dl class="kv">${kvRows([
+        ['Model', mono(d.model_id)],
+        ['Served name', (d.served_names || []).map(n => `<code class="route-chip">${escapeHtml(n)}</code>`).join(' ')],
+        ['Route LiteLLM', routes.length ? routes.map(r => `<code class="route-chip">${escapeHtml(r)}</code>`).join(' ') : '<span class="muted">Chưa khai báo trong litellm_config.yaml</span>'],
+        ['Gọi trực tiếp', d.host_port ? mono(`http://<host>:${d.host_port}/v1`) : mono(`http://${d.service}:8000/v1 (mạng nội bộ docker)`)],
+        ['Qua gateway', mono('http://<host>:4000/v1')]
+      ])}</dl>
+    </section>
+
+    <section class="drawer-section">
+      <h4>Tài nguyên GPU</h4>
+      <dl class="kv">${kvRows([
+        ['GPU', gpuRows],
+        ['Tensor parallel', mono(d.tensor_parallel_size)],
+        ['GPU mem util', `${mono(d.gpu_memory_utilization || '--')}${vramGb ? ` <span class="muted">≈ ${vramGb} GB VRAM</span>` : ''}`],
+        ['Max model len', mono(d.max_model_len ? `${d.max_model_len.toLocaleString('vi-VN')} tokens` : '--')],
+        ['KV cache dtype', mono(flagValue('--kv-cache-dtype') || 'auto')],
+        ['Max num seqs', mono(flagValue('--max-num-seqs') || 'mặc định')]
+      ])}</dl>
+    </section>
+
+    <section class="drawer-section">
+      <h4>Container</h4>
+      <dl class="kv">${kvRows([
+        ['Image', mono(d.image)],
+        ['Compose service', mono(d.service)],
+        ['Cổng host', mono(d.host_port ? `${d.host_port} → 8000` : 'không publish')],
+        ['Restart policy', mono(d.restart_policy || '--')],
+        ['IPC / SHM', mono(`${d.ipc_mode || '--'} / ${d.shm_size_gb} GB`)],
+        ['Bắt đầu', mono(d.started_at ? new Date(d.started_at).toLocaleString('vi-VN') : '--')]
+      ])}</dl>
+    </section>
+
+    <section class="drawer-section">
+      <div class="drawer-section-head">
+        <h4>Tham số vLLM <span class="muted">${flags.length}</span></h4>
+        <button type="button" class="btn btn-secondary btn-sm" id="copyServeCmd">Sao chép lệnh</button>
+      </div>
+      <table class="args-table"><tbody>
+        ${flags.map(f => `<tr><td>${escapeHtml(f.flag)}</td><td>${f.value ? escapeHtml(f.value) : '<span class="muted">bật</span>'}</td></tr>`).join('')}
+      </tbody></table>
+    </section>
+
+    <section class="drawer-section">
+      <h4>Biến môi trường <span class="muted">${Object.keys(d.env || {}).length}</span></h4>
+      <table class="args-table"><tbody>
+        ${Object.entries(d.env || {}).map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}
+      </tbody></table>
+    </section>
+
+    <section class="drawer-section">
+      <h4>Volume</h4>
+      <table class="args-table"><tbody>
+        ${(d.mounts || []).map(m => `<tr><td>${escapeHtml(m.target)}</td><td>${escapeHtml(m.source)} <span class="muted">${m.rw ? 'rw' : 'ro'}</span></td></tr>`).join('') || '<tr><td colspan="2" class="muted">Không có</td></tr>'}
+      </tbody></table>
+    </section>
+
+    <div class="drawer-actions">
+      <button type="button" class="btn btn-secondary btn-sm" data-drawer-act="logs">Xem nhật ký</button>
+      ${d.running
+        ? '<button type="button" class="btn btn-secondary btn-sm" data-drawer-act="restart">Khởi động lại</button>'
+        : '<button type="button" class="btn btn-primary btn-sm" data-drawer-act="start">Bật container</button>'}
+    </div>
+  `;
+
+  document.getElementById('copyServeCmd')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(serveCmd);
+      showToast('Đã sao chép lệnh vllm serve', 'success');
+    } catch {
+      showToast('Trình duyệt chặn clipboard (cần HTTPS)', 'error');
+    }
+  });
+  document.querySelectorAll('[data-drawer-act]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const act = btn.dataset.drawerAct;
+      closeDeployDrawer();
+      if (act === 'logs') openLogsFor(d.container);
+      else handleContainerAction(act, d.container);
+    });
+  });
+
+  const drawer = document.getElementById('deployDrawer');
+  drawer.removeAttribute('inert');
+  drawer.setAttribute('aria-hidden', 'false');
+  drawer.classList.add('open');
+  document.getElementById('deployDrawerBackdrop').classList.add('open');
+  document.body.classList.add('drawer-open');
+  drawer.querySelector('.drawer-body').scrollTop = 0;
+  drawer.querySelector('.drawer-header .icon-btn').focus();
+}
+
+function closeDeployDrawer() {
+  const drawer = document.getElementById('deployDrawer');
+  if (!drawer || !drawer.classList.contains('open')) return;
+  drawer.classList.remove('open');
+  drawer.setAttribute('aria-hidden', 'true');
+  drawer.setAttribute('inert', '');
+  document.getElementById('deployDrawerBackdrop').classList.remove('open');
+  document.body.classList.remove('drawer-open');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDeployDrawer();
 });
