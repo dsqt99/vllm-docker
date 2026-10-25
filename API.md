@@ -13,8 +13,10 @@ Tài liệu này hướng dẫn chi tiết cách sử dụng các API được c
 | Tên Model | Loại | Model gốc | Port trực tiếp |
 | :--- | :--- | :--- | :--- |
 | `qwen-3.5-9b` / `Qwen/Qwen3.5-9B` | Văn bản (LLM) | Qwen3.5-9B | `8000` (nội bộ) |
-| `hunyuan-ocr` / `tencent/HunyuanOCR` | OCR & Trích xuất ảnh | Tencent HunyuanOCR | `8003` |
+| `hunyuan-ocr` / `tencent/HunyuanOCR` | OCR & Trích xuất ảnh đa ngôn ngữ | Tencent HunyuanOCR | `8003` |
+| `senocr-vi` / `VietAlphaLabs/SenOCR-Vi` | Chuyên dụng OCR tài liệu Tiếng Việt | SenOCR-Vi (PaddleOCR-VL-1.6 finetune) | `8007` |
 | `qwen3-embedding-0.6b` / `Qwen/Qwen3-Embedding-0.6B` | Vector Embedding | Qwen3-Embedding-0.6B | `8004` |
+| `bge-reranker-v2-m3` / `BAAI/bge-reranker-v2-m3` | Reranker đa ngôn ngữ / Tiếng Việt | BAAI bge-reranker-v2-m3 | `8005` |
 | `decision-qwen` / `qwen-decision` | Structured Decisions / Classification / Routing | Qwen3.5-9B-GPTQ-INT4 (`--logprobs-mode raw_logprobs`) | `8006` |
 
 Bạn cũng có thể lấy danh sách model trực tiếp qua API:
@@ -75,7 +77,33 @@ curl -X POST https://vllm.anm05.com/v1/chat/completions \
   }'
 ```
 
+### Ví dụ OCR Tiếng Việt với `senocr-vi` (Trích xuất văn bản từ ảnh tài liệu)
+```bash
+curl -X POST https://vllm.anm05.com/v1/chat/completions \
+  -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "senocr-vi",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "OCR:"},
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://example.com/tai-lieu-tieng-viet.png"
+            }
+          }
+        ]
+      }
+    ],
+    "max_tokens": 4096
+  }'
+```
+
 ---
+
 
 ## 5. Streaming API
 

@@ -47,7 +47,8 @@ Hệ thống phục vụ suy luận mô hình ngôn ngữ lớn (LLM), đa phư�
 | Dịch vụ / Model | Model ID HuggingFace | Vai trò chính | Port trực tiếp | Port qua Gateway (LiteLLM) |
 | :--- | :--- | :--- | :--- | :--- |
 | **qwen** | `Qwen/Qwen3.5-9B` | LLM Text & Vision (FP8, TP=2) | `8000` (nội bộ) | `4000` (`/v1/chat/completions`) |
-| **hunyuan-ocr** | `tencent/HunyuanOCR` | OCR & Trích xuất ảnh | `8003` | `4000` (`/v1/chat/completions`) |
+| **hunyuan-ocr** | `tencent/HunyuanOCR` | OCR & Trích xuất ảnh đa ngôn ngữ | `8003` | `4000` (`/v1/chat/completions`) |
+| **senocr-vi** | `VietAlphaLabs/SenOCR-Vi` | Chuyên dụng OCR tài liệu Tiếng Việt (0.96B) | `8007` | `4000` (`/v1/chat/completions`) |
 | **qwen-embedding**| `Qwen/Qwen3-Embedding-0.6B` | Vector Embedding | `8004` | `4000` (`/v1/embeddings`) |
 | **bge-reranker** | `BAAI/bge-reranker-v2-m3` | Reranker đa ngôn ngữ / Tiếng Việt | `8005` | `4000` (`/v1/rerank`) |
 | **decision-qwen** | `Qwen/Qwen3.5-9B` | Structured Decisions / Classification | `8006` | `4000` (`/v1/decisions`, `/v1/systemone`) |

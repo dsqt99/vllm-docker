@@ -49,6 +49,7 @@ services:
       start_period: 120s
 
   hunyuan-ocr:
+    profiles: ["ocr-hunyuan"]
     image: vllm-ocr:latest
     container_name: hunyuan-ocr
     runtime: nvidia
@@ -63,8 +64,8 @@ services:
     command: >
       --model tencent/HunyuanOCR
       --served-model-name tencent/HunyuanOCR
-      --gpu-memory-utilization 0.35
-      --max-model-len 8192
+      --gpu-memory-utilization 0.16
+      --max-model-len 4096
       --tensor-parallel-size 1
       --enforce-eager
       --no-enable-prefix-caching
@@ -88,6 +89,51 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+
+  senocr-vi:
+    image: vllm/vllm-openai:nightly
+    container_name: senocr-vi
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '8g'
+    ports:
+      - "${SENOCR_PORT:-8007}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=${SENOCR_GPU_DEVICES:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}
+    command: >
+      --model ${SENOCR_MODEL_ID:-VietAlphaLabs/SenOCR-Vi}
+      --served-model-name ${SENOCR_MODEL_ID:-VietAlphaLabs/SenOCR-Vi} senocr-vi
+      --trust-remote-code
+      --gpu-memory-utilization ${SENOCR_GPU_MEMORY_UTILIZATION:-0.25}
+      --max-model-len ${SENOCR_MAX_MODEL_LEN:-4096}
+      --kv-cache-dtype fp8
+      --tensor-parallel-size 1
+      --enforce-eager
+      --no-enable-prefix-caching
+      --mm-processor-cache-gb 0
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - vllm_default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   qwen-embedding:
     image: vllm/vllm-openai:nightly
     container_name: qwen-embedding
@@ -104,7 +150,7 @@ services:
       --model Qwen/Qwen3-Embedding-0.6B
       --served-model-name Qwen/Qwen3-Embedding-0.6B
       --runner pooling
-      --gpu-memory-utilization 0.11
+      --gpu-memory-utilization 0.10
       --max-model-len 8192
       --tensor-parallel-size 1
       --enforce-eager
@@ -187,7 +233,7 @@ services:
     command: >
       --model ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4}
       --served-model-name ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4} Qwen/Qwen3.5-9B qwen-decision decision-qwen
-      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.38}
+      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.37}
       --max-model-len ${DECISION_MAX_MODEL_LEN:-8192}
       --kv-cache-dtype fp8
       --enforce-eager
@@ -254,6 +300,7 @@ services:
       - ./manager/static:/app/static
       - ./logs:/app/logs
     environment:
+      - VLLM_MANAGER_API_KEY=${VLLM_MANAGER_API_KEY}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
       - VLLM_API_BASE=http://qwen:8000
       - LITELLM_API_BASE=http://vllm-litellm:4000

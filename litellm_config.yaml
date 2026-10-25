@@ -37,6 +37,20 @@ model_list:
       api_key: EMPTY
     model_info:
       supports_vision: true
+  - model_name: senocr-vi
+    litellm_params:
+      model: openai/VietAlphaLabs/SenOCR-Vi
+      api_base: http://senocr-vi:8000/v1
+      api_key: EMPTY
+    model_info:
+      supports_vision: true
+  - model_name: VietAlphaLabs/SenOCR-Vi
+    litellm_params:
+      model: openai/VietAlphaLabs/SenOCR-Vi
+      api_base: http://senocr-vi:8000/v1
+      api_key: EMPTY
+    model_info:
+      supports_vision: true
   - model_name: qwen3-embedding-0.6b
     litellm_params:
       model: hosted_vllm/Qwen/Qwen3-Embedding-0.6B

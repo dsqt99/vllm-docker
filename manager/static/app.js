@@ -2,6 +2,58 @@
 // 100% Offline / Vanilla JS / Zero Em-Dashes
 // Conforms to design-taste-frontend guidelines
 
+// API Key Authentication Interceptor
+const originalFetch = window.fetch;
+let isPromptingApiKey = false;
+
+window.fetch = async function(url, options = {}) {
+  options = options || {};
+  options.headers = options.headers || {};
+
+  const apiKey = localStorage.getItem('vllm_manager_api_key');
+  if (apiKey) {
+    if (options.headers instanceof Headers) {
+      if (!options.headers.has('Authorization')) {
+        options.headers.set('Authorization', `Bearer ${apiKey}`);
+      }
+    } else if (Array.isArray(options.headers)) {
+      options.headers.push(['Authorization', `Bearer ${apiKey}`]);
+    } else {
+      if (!options.headers['Authorization']) {
+        options.headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+    }
+  }
+
+  const response = await originalFetch(url, options);
+  if (response.status === 401 && !url.toString().includes('/api/health')) {
+    if (!isPromptingApiKey) {
+      isPromptingApiKey = true;
+      setTimeout(() => {
+        const entered = prompt('Hệ thống yêu cầu xác thực vLLM Manager API Key.\nVui lòng nhập API Key:', localStorage.getItem('vllm_manager_api_key') || '');
+        if (entered !== null) {
+          localStorage.setItem('vllm_manager_api_key', entered.trim());
+          window.location.reload();
+        }
+        isPromptingApiKey = false;
+      }, 150);
+    }
+  }
+  return response;
+};
+
+function configureApiKey() {
+  const currentKey = localStorage.getItem('vllm_manager_api_key') || '';
+  const newKey = prompt('Cấu hình vLLM Manager API Key (bỏ trống nếu không dùng):', currentKey);
+  if (newKey !== null) {
+    localStorage.setItem('vllm_manager_api_key', newKey.trim());
+    if (typeof showToast === 'function') {
+      showToast('Đã lưu API Key!', 'success');
+    }
+    window.location.reload();
+  }
+}
+
 const API = {
   gpuStatus: '/api/gpu/status',
   instanceStatus: '/api/instance/status',
