@@ -51,6 +51,7 @@ cp docker-compose.yml "$EXPORT_DIR/config/"
 cp docker-compose.prod.yml "$EXPORT_DIR/config/" || true
 cp litellm_config.yaml "$EXPORT_DIR/config/"
 cp litellm_logger.py "$EXPORT_DIR/config/"
+cp patch_strategies.py "$EXPORT_DIR/config/" || true
 cp .env.example "$EXPORT_DIR/config/.env.example"
 cp -r monitoring "$EXPORT_DIR/config/"
 cp -r manager "$EXPORT_DIR/config/"

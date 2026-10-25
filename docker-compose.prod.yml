@@ -255,6 +255,57 @@ services:
       start_period: 30s
 
   # ============================================================================
+  # MODEL 6: Decision Router Model (Phân loại ý định / Rẽ nhánh)
+  # Phân bổ: GPU 3 | Quantized INT4 | VRAM ~9GB | Context 8K
+  # ============================================================================
+  decision-qwen:
+    image: vllm/vllm-openai:nightly
+    container_name: decision-qwen
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '8g'
+    ports:
+      - "${DECISION_PORT:-8006}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-3}
+    command: >
+      --model ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4}
+      --served-model-name ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4} Qwen/Qwen3.5-9B qwen-decision decision-qwen
+      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.15}
+      --max-model-len ${DECISION_MAX_MODEL_LEN:-8192}
+      --kv-cache-dtype fp8
+      --enforce-eager
+      --tensor-parallel-size 1
+      --enable-prefix-caching
+      --logprobs-mode raw_logprobs
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - ${HF_CACHE_DIR:-/root/.cache/huggingface}:/root/.cache/huggingface
+      - ./patch_strategies.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/decisions/strategies.py:ro
+    networks:
+      vllm_default:
+        aliases:
+          - decision-qwen
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ============================================================================
   # LITELLM GATEWAY: Cổng thống nhất toàn bộ API AI suy luận
   # ============================================================================
   litellm:
