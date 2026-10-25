@@ -50,7 +50,7 @@ echo "--> [3/4] Sao chép cấu hình, dashboard và mã nguồn manager..."
 cp docker-compose.yml "$EXPORT_DIR/config/"
 cp litellm_config.yaml "$EXPORT_DIR/config/"
 cp litellm_logger.py "$EXPORT_DIR/config/"
-cp .env "$EXPORT_DIR/config/.env.example" || true
+cp .env.example "$EXPORT_DIR/config/.env.example"
 cp -r monitoring "$EXPORT_DIR/config/"
 cp -r manager "$EXPORT_DIR/config/"
 
@@ -71,7 +71,7 @@ if ! command -v nvidia-smi &> /dev/null; then
 fi
 
 echo "✅ Đã tìm thấy NVIDIA Driver:"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 
 # 2. Nạp Docker Images từ file nén
 echo "--> Nạp các Docker Images vào hệ thống..."
@@ -86,6 +86,10 @@ done
 if [ ! -f "config/.env" ]; then
     echo "--> Tạo file .env từ .env.example..."
     cp config/.env.example config/.env
+    # Tự động gán HF_CACHE_DIR theo thư mục cache của user hiện tại trên máy chủ
+    TARGET_CACHE="$HOME/.cache/huggingface"
+    sed -i "s|HF_CACHE_DIR=.*|HF_CACHE_DIR=$TARGET_CACHE|g" config/.env
+    echo "--> Đã cấu hình HF_CACHE_DIR=$TARGET_CACHE trong config/.env"
 fi
 
 # 4. Khởi chạy toàn bộ hệ sinh thái

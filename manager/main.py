@@ -208,43 +208,54 @@ def get_gpu_status() -> List[Dict[str, Any]]:
         for line in output.splitlines():
             parts = [p.strip() for p in line.split(",")]
             if len(parts) >= 11:
-                idx = int(parts[0])
-                total_mb = float(parts[3])
-                used_mb = float(parts[4])
-                free_mb = float(parts[5])
-                percent = round((used_mb / total_mb * 100), 1) if total_mb > 0 else 0
-                gpus.append({
-                    "index": idx,
-                    "name": parts[1],
-                    "uuid": parts[2],
-                    "memory_total_mb": int(total_mb),
-                    "memory_used_mb": int(used_mb),
-                    "memory_free_mb": int(free_mb),
-                    "memory_percent": percent,
-                    "temperature_c": int(parts[6]),
-                    "power_draw_w": round(float(parts[7]), 1),
-                    "power_limit_w": round(float(parts[8]), 1),
-                    "fan_percent": int(parts[9]) if parts[9].isdigit() else 0,
-                    "utilization_percent": int(parts[10]),
-                    "processes": []
-                })
+                try:
+                    idx = int(parts[0])
+                    total_mb = float(parts[3])
+                    used_mb = float(parts[4])
+                    free_mb = float(parts[5])
+                    percent = round((used_mb / total_mb * 100), 1) if total_mb > 0 else 0
+                    
+                    # Safe parsing for non-standard GPUs (T4, A100 without fans or power limits)
+                    temp = int(parts[6]) if parts[6].isdigit() else 0
+                    pwr_draw = round(float(parts[7]), 1) if parts[7].replace(".", "", 1).isdigit() else 0.0
+                    pwr_lim = round(float(parts[8]), 1) if parts[8].replace(".", "", 1).isdigit() else 0.0
+                    fan = int(parts[9]) if parts[9].isdigit() else 0
+                    util = int(parts[10]) if parts[10].isdigit() else 0
 
-    # If nvidia-smi failed or in limited container, fall back to known 4x RTX 3090 specs
-    if not gpus:
+                    gpus.append({
+                        "index": idx,
+                        "name": parts[1],
+                        "uuid": parts[2],
+                        "memory_total_mb": int(total_mb),
+                        "memory_used_mb": int(used_mb),
+                        "memory_free_mb": int(free_mb),
+                        "memory_percent": percent,
+                        "temperature_c": temp,
+                        "power_draw_w": pwr_draw,
+                        "power_limit_w": pwr_lim,
+                        "fan_percent": fan,
+                        "utilization_percent": util,
+                        "processes": []
+                    })
+                except Exception as e:
+                    logger.warning(f"Error parsing nvidia-smi line '{line}': {e}")
+
+    # Fallback only when explicitly requested in dev/mock mode
+    if not gpus and os.environ.get("ENABLE_MOCK_GPU", "").lower() in ("1", "true"):
         for idx, uuid in GPU_UUID_MAP.items():
             gpus.append({
                 "index": idx,
-                "name": "NVIDIA GeForce RTX 3090",
+                "name": "NVIDIA GPU (Mock)",
                 "uuid": uuid,
                 "memory_total_mb": 24576,
-                "memory_used_mb": 21600 if idx in (0, 2) else (22200 if idx == 1 else 18),
-                "memory_free_mb": 2976 if idx in (0, 2) else (2376 if idx == 1 else 24558),
-                "memory_percent": 88.0 if idx in (0, 2) else (90.5 if idx == 1 else 0.1),
-                "temperature_c": 48 if idx in (0, 2) else 33,
-                "power_draw_w": 180.0 if idx in (0, 2) else 25.0,
+                "memory_used_mb": 0,
+                "memory_free_mb": 24576,
+                "memory_percent": 0.0,
+                "temperature_c": 35,
+                "power_draw_w": 25.0,
                 "power_limit_w": 350.0,
-                "fan_percent": 32,
-                "utilization_percent": 65 if idx in (0, 2) else 0,
+                "fan_percent": 30,
+                "utilization_percent": 0,
                 "processes": []
             })
 
@@ -501,7 +512,7 @@ def get_container_info(container_name: str) -> Dict[str, Any]:
             "args": []
         }
 
-PRIMARY_CONTAINER = "qwen"
+PRIMARY_CONTAINER = os.environ.get("PRIMARY_CONTAINER", "qwen").strip()
 GATEWAY_CONTAINER = "vllm-litellm"
 _deployments_cache: Dict[str, Any] = {"at": 0.0, "data": []}
 SECRET_ENV_PATTERN = re.compile(r"TOKEN|KEY|SECRET|PASSWORD|PASS|CREDENTIAL", re.IGNORECASE)
@@ -619,6 +630,17 @@ def discover_deployments(max_age: float = 2.0) -> List[Dict[str, Any]]:
             "shm_size_gb": round(((c.get("HostConfig") or {}).get("ShmSize") or 0) / 1024**3, 1),
             "ipc_mode": (c.get("HostConfig") or {}).get("IpcMode", ""),
         })
+
+    # Auto-assign primary container if designated PRIMARY_CONTAINER is not present
+    if deployments and not any(d["is_primary"] for d in deployments):
+        # Look for running chat/LLM container first
+        chat_llm = next((d for d in deployments if d.get("role") in ("chat", "LLM") and d.get("running")), None)
+        if not chat_llm:
+            chat_llm = next((d for d in deployments if d.get("role") in ("chat", "LLM")), None)
+        if chat_llm:
+            chat_llm["is_primary"] = True
+        else:
+            deployments[0]["is_primary"] = True
 
     deployments.sort(key=lambda d: (not d["is_primary"], not d["running"], d["container"]))
     _deployments_cache.update(at=now, data=deployments)
@@ -871,13 +893,20 @@ async def api_instance_action(req: ContainerActionRequest):
 async def api_instance_switch(req: SwitchModelRequest, background_tasks: BackgroundTasks):
     logger.info(f"Switching model to {req.model_id} (TP={req.tensor_parallel_size})")
 
-    # Map GPU indices to UUIDs
+    # Dynamic GPU mapping from actual system GPUs
+    current_gpus = get_gpu_status()
+    dynamic_uuid_map = {g["index"]: g.get("uuid", str(g["index"])) for g in current_gpus}
+
     selected_uuids = []
     for idx in req.gpu_indices:
-        if idx in GPU_UUID_MAP:
+        if idx in dynamic_uuid_map and dynamic_uuid_map[idx]:
+            selected_uuids.append(dynamic_uuid_map[idx])
+        elif idx in GPU_UUID_MAP:
             selected_uuids.append(GPU_UUID_MAP[idx])
+        else:
+            selected_uuids.append(str(idx))
     if not selected_uuids:
-        selected_uuids = [GPU_UUID_MAP[0], GPU_UUID_MAP[2]]
+        selected_uuids = [dynamic_uuid_map.get(0, "0")]
 
     gpu_devices_str = ",".join(selected_uuids)
     previous_model_id = read_current_env().get("MODEL_ID", "")
@@ -895,11 +924,11 @@ async def api_instance_switch(req: SwitchModelRequest, background_tasks: Backgro
     # Update litellm_config.yaml
     update_litellm_config(req.model_id, previous_model_id)
 
-    # Restart qwen container using docker compose or direct docker command
+    # Restart primary container using docker compose or direct docker command
     def do_restart():
         try:
-            logger.info("Recreating qwen container with new model config...")
-            run_command(["docker", "compose", "-f", str(DOCKER_COMPOSE_PATH), "up", "-d", "--no-deps", "qwen"], timeout=120)
+            logger.info(f"Recreating {PRIMARY_CONTAINER} container with new model config...")
+            run_command(["docker", "compose", "-f", str(DOCKER_COMPOSE_PATH), "up", "-d", "--no-deps", PRIMARY_CONTAINER], timeout=120)
             logger.info("Restarting vllm-litellm gateway...")
             run_command(["docker", "restart", "vllm-litellm"], timeout=30)
         except Exception as e:
@@ -914,8 +943,15 @@ async def api_instance_switch(req: SwitchModelRequest, background_tasks: Backgro
     }
 
 @app.get("/api/instance/logs")
-async def api_instance_logs(tail: int = 100, container: str = PRIMARY_CONTAINER):
-    allowed = {d["container"] for d in discover_deployments()} | {PRIMARY_CONTAINER, GATEWAY_CONTAINER}
+async def api_instance_logs(tail: int = 100, container: Optional[str] = None):
+    deployments = discover_deployments()
+    dep_names = [d["container"] for d in deployments]
+
+    if not container or container in ("undefined", "null", ""):
+        primary = next((d["container"] for d in deployments if d.get("is_primary")), None)
+        container = primary or (dep_names[0] if dep_names else PRIMARY_CONTAINER)
+
+    allowed = set(dep_names) | {PRIMARY_CONTAINER, GATEWAY_CONTAINER, "vllm-litellm", "vllm-manager"}
     if container not in allowed:
         raise HTTPException(status_code=400, detail=f"Container '{container}' không thuộc cụm vLLM")
     cmd = ["docker", "logs", "--tail", str(min(tail, 500)), container]

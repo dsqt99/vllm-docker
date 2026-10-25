@@ -266,9 +266,11 @@ function updateServingSummary(data) {
   }
   const sub = document.getElementById('bentoServingSub');
   if (sub) {
-    sub.textContent = primary
-      ? `Chính: ${primary.model_id.split('/').pop()} · TP ${primary.tensor_parallel_size}`
-      : 'Không tìm thấy container qwen chính';
+    if (running > 0) {
+      sub.textContent = `${running} mô hình định tuyến qua LiteLLM gateway`;
+    } else {
+      sub.textContent = 'Chưa có container phục vụ';
+    }
   }
 
   const gwBadge = document.getElementById('bentoGatewayBadge');
@@ -425,7 +427,9 @@ function updateClusterMetrics(gpus) {
   if (bentoSub) bentoSub.textContent = `Khả dụng: ${(totalGb - parseFloat(usedGb)).toFixed(1)} GB đệm`;
 
   if (rackTitle) {
-    rackTitle.textContent = `Cụm ${gpus.length}x GPU NVIDIA RTX 3090 (${totalGb} GB VRAM)`;
+    const rawGpuName = gpus[0]?.name || 'NVIDIA GPU';
+    const gpuName = rawGpuName.replace('NVIDIA ', '').replace('GeForce ', '');
+    rackTitle.textContent = `Cụm ${gpus.length}x GPU ${gpuName} (${totalGb} GB VRAM)`;
   }
 }
 
@@ -468,7 +472,9 @@ function renderGpuGrid(gpus) {
     const nameGroup = document.createElement('div');
     nameGroup.className = 'gpu-name-group';
     const title = document.createElement('h4');
-    title.innerHTML = `<span>GPU ${gpu.index}: RTX 3090</span>`;
+    const rawName = gpu.name || 'GPU';
+    const shortName = rawName.replace('NVIDIA ', '').replace('GeForce ', '');
+    title.innerHTML = `<span>GPU ${gpu.index}: ${shortName}</span>`;
     const uuid = document.createElement('div');
     uuid.className = 'gpu-uuid';
     uuid.textContent = gpu.uuid ? `${gpu.uuid.substring(0, 18)}...` : 'N/A';
@@ -928,7 +934,8 @@ async function refreshLogs() {
   if (!viewer) return;
 
   try {
-    const container = document.getElementById('logsContainerSelect')?.value || 'qwen';
+    const select = document.getElementById('logsContainerSelect');
+    const container = select?.value || (state.deployments.find(d => d.is_primary)?.container || state.deployments[0]?.container || 'qwen');
     const res = await fetch(`${API.instanceLogs}?tail=200&container=${encodeURIComponent(container)}`);
     if (!res.ok) return;
     const data = await res.json();

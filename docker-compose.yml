@@ -31,7 +31,7 @@ services:
       --reasoning-parser qwen3
       --logprobs-mode raw_logprobs
     volumes:
-      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
     networks:
       - vllm_default
     deploy:
@@ -40,8 +40,8 @@ services:
           devices:
             - driver: nvidia
               device_ids:
-                - 'GPU-457b0f54-0926-45b5-56f0-103cb0feacbc'
-                - 'GPU-6afb412f-80fa-fc33-b672-2a6770592f1f'
+                - '${MAIN_GPU_0:-GPU-457b0f54-0926-45b5-56f0-103cb0feacbc}'
+                - '${MAIN_GPU_1:-GPU-6afb412f-80fa-fc33-b672-2a6770592f1f}'
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -64,7 +64,7 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
       - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
       - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
-      - NVIDIA_VISIBLE_DEVICES=GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+      - NVIDIA_VISIBLE_DEVICES=${HUNYUAN_GPU_DEVICES:-${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}}
     command: >
       --model tencent/HunyuanOCR
       --served-model-name tencent/HunyuanOCR
@@ -77,7 +77,7 @@ services:
       --host 0.0.0.0
       --port 8000
     volumes:
-      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
     networks:
       - vllm_default
     deploy:
@@ -86,7 +86,7 @@ services:
           devices:
             - driver: nvidia
               device_ids:
-                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+                - '${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}'
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -107,7 +107,7 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
       - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
       - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
-      - NVIDIA_VISIBLE_DEVICES=${SENOCR_GPU_DEVICES:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}
+      - NVIDIA_VISIBLE_DEVICES=${SENOCR_GPU_DEVICES:-${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}}
     command: >
       --model ${SENOCR_MODEL_ID:-VietAlphaLabs/SenOCR-Vi}
       --served-model-name ${SENOCR_MODEL_ID:-VietAlphaLabs/SenOCR-Vi} senocr-vi
@@ -122,7 +122,7 @@ services:
       --host 0.0.0.0
       --port 8000
     volumes:
-      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
     networks:
       - vllm_default
     deploy:
@@ -131,7 +131,7 @@ services:
           devices:
             - driver: nvidia
               device_ids:
-                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+                - '${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}'
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -153,7 +153,7 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
       - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
       - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
-      - NVIDIA_VISIBLE_DEVICES=GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+      - NVIDIA_VISIBLE_DEVICES=${EMBEDDING_GPU_DEVICES:-${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}}
     command: >
       --model Qwen/Qwen3-Embedding-0.6B
       --served-model-name Qwen/Qwen3-Embedding-0.6B
@@ -165,7 +165,7 @@ services:
       --host 0.0.0.0
       --port 8000
     volumes:
-      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
     networks:
       - vllm_default
     deploy:
@@ -174,7 +174,7 @@ services:
           devices:
             - driver: nvidia
               device_ids:
-                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+                - '${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}'
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -196,7 +196,7 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
       - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
       - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
-      - NVIDIA_VISIBLE_DEVICES=GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+      - NVIDIA_VISIBLE_DEVICES=${RERANKER_GPU_DEVICES:-${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}}
     command: >
       --model BAAI/bge-reranker-v2-m3
       --served-model-name BAAI/bge-reranker-v2-m3
@@ -208,7 +208,7 @@ services:
       --host 0.0.0.0
       --port 8000
     volumes:
-      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
     networks:
       - vllm_default
     deploy:
@@ -217,7 +217,7 @@ services:
           devices:
             - driver: nvidia
               device_ids:
-                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+                - '${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}'
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -241,7 +241,7 @@ services:
       - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-      - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}
+      - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}}
     command: >
       --model ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4}
       --served-model-name ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4} Qwen/Qwen3.5-9B qwen-decision decision-qwen
@@ -255,7 +255,7 @@ services:
       --host 0.0.0.0
       --port 8000
     volumes:
-      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
       - ./patch_strategies.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/decisions/strategies.py:ro
     networks:
       - vllm_default
@@ -265,7 +265,7 @@ services:
           devices:
             - driver: nvidia
               device_ids:
-                - 'GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3'
+                - '${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}'
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -304,7 +304,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/libexec/docker/cli-plugins:/usr/local/lib/docker/cli-plugins:ro
-      - /home/cahy/.cache/huggingface:/root/.cache/huggingface
+      - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
       - ./litellm_config.yaml:/app/litellm_config.yaml
       - ./.env:/app/.env
       - ./docker-compose.yml:/app/docker-compose.yml
@@ -314,11 +314,12 @@ services:
     environment:
       - VLLM_MANAGER_API_KEY=${VLLM_MANAGER_API_KEY}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
-      - VLLM_API_BASE=http://qwen:8000
-      - LITELLM_API_BASE=http://vllm-litellm:4000
-      - MANAGER_PORT=8050
+      - VLLM_API_BASE=${VLLM_API_BASE:-http://qwen:8000}
+      - LITELLM_API_BASE=${LITELLM_API_BASE:-http://vllm-litellm:4000}
+      - MANAGER_PORT=${MANAGER_PORT:-8050}
+      - PRIMARY_CONTAINER=${PRIMARY_CONTAINER:-qwen}
       - AUDIT_LOG_FILE=/app/logs/audit.log
-      - NVIDIA_VISIBLE_DEVICES=GPU-457b0f54-0926-45b5-56f0-103cb0feacbc,GPU-6afb412f-80fa-fc33-b672-2a6770592f1f,GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3
+      - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     networks:
       - vllm_default
