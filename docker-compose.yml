@@ -243,10 +243,10 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}}
     command: >
-      --model ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B}
-      --served-model-name ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B} qwen-decision decision-qwen
-      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.25}
-      --max-model-len ${DECISION_MAX_MODEL_LEN:-8192}
+      --model ${DECISION_MODEL_ID:-Cloudflare/clef-flash}
+      --served-model-name ${DECISION_MODEL_ID:-Cloudflare/clef-flash} Cloudflare/clef-flash decision-qwen
+      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.20}
+      --max-model-len ${DECISION_MAX_MODEL_LEN:-16384}
       --kv-cache-dtype fp8
       --enforce-eager
       --tensor-parallel-size 1

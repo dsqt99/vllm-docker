@@ -71,11 +71,11 @@ model_list:
       model: hosted_vllm/BAAI/bge-reranker-v2-m3
       api_base: http://bge-reranker:8000/v1
       api_key: EMPTY
-  - model_name: qwen-decision
+  - model_name: Cloudflare/clef-flash
     model_info:
       supports_decision: true
     litellm_params:
-      model: openai/Qwen/Qwen3.5-9B
+      model: openai/Cloudflare/clef-flash
       api_base: http://decision-qwen:8000/v1
       api_key: EMPTY
       extra_body:
@@ -85,7 +85,7 @@ model_list:
     model_info:
       supports_decision: true
     litellm_params:
-      model: openai/Qwen/Qwen3.5-9B
+      model: openai/Cloudflare/clef-flash
       api_base: http://decision-qwen:8000/v1
       api_key: EMPTY
       extra_body:
@@ -95,7 +95,7 @@ model_list:
     model_info:
       supports_decision: true
     litellm_params:
-      model: openai/Qwen/Qwen3.5-9B
+      model: openai/Cloudflare/clef-flash
       api_base: http://decision-qwen:8000/v1
       api_key: EMPTY
       extra_body:
