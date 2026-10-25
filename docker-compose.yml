@@ -53,6 +53,9 @@ services:
   hunyuan-ocr:
     profiles: ["ocr-hunyuan"]
     image: vllm-ocr:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ocr
     container_name: hunyuan-ocr
     runtime: nvidia
     restart: unless-stopped

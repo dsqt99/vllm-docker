@@ -14,16 +14,20 @@ echo "=================================================================="
 echo " [1/4] Chuẩn bị đóng gói vLLM Manager & Monitoring Stack..."
 echo "=================================================================="
 
-# 1. Build vllm-manager image nếu chưa có tag
+# 1. Build vllm-manager & vllm-ocr image nếu chưa có tag
 echo "--> Building vllm-manager image..."
 docker compose build manager
 
+echo "--> Building vllm-ocr image..."
+docker build -t vllm-ocr:latest -f Dockerfile.ocr . || true
+
 # 2. Xuất danh sách Docker Images ra file nén tar.gz
-echo "--> [2/4] Đóng gói các Docker Images (vLLM, LiteLLM, Manager, Prometheus, Grafana)..."
+echo "--> [2/4] Đóng gói các Docker Images (vLLM, vLLM-OCR, LiteLLM, Manager, Prometheus, Grafana)..."
 echo "    Quá trình này có thể mất vài phút tùy tốc độ ổ đĩa..."
 
 IMAGES=(
   "vllm/vllm-openai:nightly"
+  "vllm-ocr:latest"
   "ghcr.io/berriai/litellm:main-latest"
   "prom/prometheus:v2.51.0"
   "grafana/grafana:10.4.0"
@@ -36,6 +40,7 @@ docker pull grafana/grafana:10.4.0 || true
 # Lưu images
 docker save \
   vllm/vllm-openai:nightly \
+  $(docker images -q vllm-ocr:latest 2>/dev/null && echo "vllm-ocr:latest") \
   ghcr.io/berriai/litellm:main-latest \
   prom/prometheus:v2.51.0 \
   grafana/grafana:10.4.0 \
@@ -49,6 +54,8 @@ docker save $(docker images --format "{{.Repository}}:{{.Tag}}" | grep manager |
 echo "--> [3/4] Sao chép cấu hình, dashboard và mã nguồn manager..."
 cp docker-compose.yml "$EXPORT_DIR/config/"
 cp docker-compose.prod.yml "$EXPORT_DIR/config/" || true
+cp Dockerfile.ocr "$EXPORT_DIR/config/" || true
+cp patch_xdrope.py "$EXPORT_DIR/config/" || true
 cp litellm_config.yaml "$EXPORT_DIR/config/"
 cp litellm_logger.py "$EXPORT_DIR/config/"
 cp patch_strategies.py "$EXPORT_DIR/config/" || true

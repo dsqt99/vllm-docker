@@ -112,6 +112,9 @@ services:
   # ============================================================================
   ai_hunyuan_ocr:
     image: vllm-ocr:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ocr
     container_name: ai_hunyuan_ocr
     runtime: nvidia
     restart: unless-stopped
