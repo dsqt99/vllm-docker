@@ -226,9 +226,9 @@ services:
       retries: 5
       start_period: 30s
 
-  decision-qwen:
+  clef-decision:
     image: vllm/vllm-openai:nightly
-    container_name: decision-qwen
+    container_name: clef-decision
     runtime: nvidia
     restart: unless-stopped
     ipc: host
@@ -244,7 +244,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-${AUX_GPU_0:-GPU-52ffc732-f2b1-3313-e814-31f49a8dadc3}}
     command: >
       --model ${DECISION_MODEL_ID:-Cloudflare/clef-flash}
-      --served-model-name ${DECISION_MODEL_ID:-Cloudflare/clef-flash} Cloudflare/clef-flash decision-qwen
+      --served-model-name ${DECISION_MODEL_ID:-Cloudflare/clef-flash} Cloudflare/clef-flash clef-decision decision-qwen
       --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.20}
       --max-model-len ${DECISION_MAX_MODEL_LEN:-16384}
       --kv-cache-dtype fp8
@@ -258,7 +258,10 @@ services:
       - ${HF_CACHE_DIR:-/home/cahy/.cache/huggingface}:/root/.cache/huggingface
       - ./patch_strategies.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/decisions/strategies.py:ro
     networks:
-      - vllm_default
+      vllm_default:
+        aliases:
+          - clef-decision
+          - decision-qwen
     deploy:
       resources:
         reservations:

@@ -258,9 +258,9 @@ services:
   # MODEL 6: Decision Router Model (Phân loại ý định / Rẽ nhánh)
   # Phân bổ: GPU 3 | Quantized INT4 | VRAM ~9GB | Context 8K
   # ============================================================================
-  decision-qwen:
+  clef-decision:
     image: vllm/vllm-openai:nightly
-    container_name: decision-qwen
+    container_name: ai_clef_decision
     runtime: nvidia
     restart: unless-stopped
     ipc: host
@@ -274,7 +274,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-3}
     command: >
       --model ${DECISION_MODEL_ID:-Cloudflare/clef-flash}
-      --served-model-name ${DECISION_MODEL_ID:-Cloudflare/clef-flash} Cloudflare/clef-flash decision-qwen
+      --served-model-name ${DECISION_MODEL_ID:-Cloudflare/clef-flash} Cloudflare/clef-flash clef-decision decision-qwen
       --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.20}
       --max-model-len ${DECISION_MAX_MODEL_LEN:-16384}
       --kv-cache-dtype fp8
@@ -290,6 +290,7 @@ services:
     networks:
       vllm_default:
         aliases:
+          - clef-decision
           - decision-qwen
     deploy:
       resources:

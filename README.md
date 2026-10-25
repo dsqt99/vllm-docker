@@ -51,7 +51,7 @@ Hệ thống phục vụ suy luận mô hình ngôn ngữ lớn (LLM), đa phư�
 | **senocr-vi** | `VietAlphaLabs/SenOCR-Vi` | Chuyên dụng OCR tài liệu Tiếng Việt (0.96B) | `8007` | `4000` (`/v1/chat/completions`) |
 | **qwen-embedding**| `Qwen/Qwen3-Embedding-0.6B` | Vector Embedding | `8004` | `4000` (`/v1/embeddings`) |
 | **bge-reranker** | `BAAI/bge-reranker-v2-m3` | Reranker đa ngôn ngữ / Tiếng Việt | `8005` | `4000` (`/v1/rerank`) |
-| **decision-qwen** | `Qwen/Qwen3.5-9B` | Structured Decisions / Classification | `8006` | `4000` (`/v1/decisions`, `/v1/systemone`) |
+| **clef-decision** | `Cloudflare/clef-flash` | Structured Decisions / Classification / Routing | `8006` | `4000` (`/v1/decisions`, `/v1/systemone`) |
 | **manager** | — | Web UI quản trị, telemetry GPU & model switcher | `8050` | `8050` |
 | **prometheus** | — | Thu thập metrics hiệu năng vLLM/GPU | `9095` | `9095` |
 | **grafana** | — | Dashboard trực quan hóa realtime | `3050` | `3050` |
@@ -128,6 +128,25 @@ Chi tiết các API khác (Embedding, Reranker, Structured Decisions, Tool Calli
 
 ## 6. Đóng gói & Chuyển giao hệ thống (Air-Gapped Deployment)
 
+Dự án cung cấp 2 phương thức đóng gói:
+
+### Cách 1: Đóng gói bản phát hành chuẩn CAHY (Khuyến nghị)
+Sử dụng script `export_release_images.py` tại thư mục gốc `final_ban_giao`:
+```bash
+# Build vLLM Manager UI (khi có thay đổi)
+docker build --platform linux/amd64 -t vllm-manager:latest manager/
+
+# Xuất riêng gói release vLLM Manager UI (~80 MB)
+python ../export_release_images.py --only vllm-manager
+
+# Hoặc xuất cả cụm AI Serving (>10 GB) và Manager UI:
+python ../export_release_images.py --only vllm vllm-manager
+```
+Kết quả sinh ra tại `release-images-YYYYMMDD/` gồm:
+- `cahy-vllm-manager-release-v1.0.0-YYYYMMDD.tar.gz` (~80 MB)
+- `cahy-vllm-release-v1.0.0-YYYYMMDD.tar.gz` (>10 GB)
+
+### Cách 2: Đóng gói trọn gói standalone bằng script shell
 Dự án cung cấp script `export_bundle.sh` giúp đóng gói toàn bộ Docker Images, cấu hình và source code thành 1 file duy nhất để mang sang server offline:
 
 ```bash

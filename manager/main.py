@@ -135,7 +135,7 @@ class SwitchModelRequest(BaseModel):
 
 class ContainerActionRequest(BaseModel):
     action: str = Field(..., pattern="^(start|stop|restart)$")
-    target: str = Field("qwen", pattern="^(qwen|decision-qwen|qwen-asr|qwen-embedding|hunyuan-ocr|senocr-vi|bge-reranker|vllm-litellm)$")
+    target: str = Field("qwen", pattern="^(qwen|clef-decision|ai_clef_decision|decision-qwen|qwen-asr|qwen-embedding|hunyuan-ocr|senocr-vi|bge-reranker|vllm-litellm)$")
 
 class LoRALoadRequest(BaseModel):
     lora_name: str = Field(..., min_length=1, max_length=80)
