@@ -48,6 +48,7 @@ docker save $(docker images --format "{{.Repository}}:{{.Tag}}" | grep manager |
 # 3. Sao chép toàn bộ cấu hình, dashboard và source manager
 echo "--> [3/4] Sao chép cấu hình, dashboard và mã nguồn manager..."
 cp docker-compose.yml "$EXPORT_DIR/config/"
+cp docker-compose.prod.yml "$EXPORT_DIR/config/" || true
 cp litellm_config.yaml "$EXPORT_DIR/config/"
 cp litellm_logger.py "$EXPORT_DIR/config/"
 cp .env.example "$EXPORT_DIR/config/.env.example"

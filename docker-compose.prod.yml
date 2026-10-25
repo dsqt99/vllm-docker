@@ -1,0 +1,361 @@
+services:
+  # ============================================================================
+  # MODEL 1: Qwen3.8-Flash-Next-FP8 (LLM Hội thoại / Suy luận chính)
+  # Phân bổ: GPU 0, 1 | TP=2 | VRAM ~192GB | Context 131K | FP8 KV-Cache
+  # ============================================================================
+  ai_flash_next:
+    image: vllm/vllm-openai:nightly
+    container_name: ai_flash_next
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '32g'
+    ports:
+      - "${FLASH_NEXT_PORT:-8000}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - NVIDIA_VISIBLE_DEVICES=${FLASH_NEXT_GPU_DEVICES:-0,1}
+      - NCCL_P2P_DISABLE=0
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    command: >
+      --model ${FLASH_NEXT_MODEL_ID:-Qwen/Qwen3.8-Flash-Next-FP8}
+      --served-model-name ${FLASH_NEXT_MODEL_ID:-Qwen/Qwen3.8-Flash-Next-FP8} qwen38-flash-next flash-next
+      --gpu-memory-utilization ${FLASH_NEXT_GPU_MEMORY_UTILIZATION:-0.92}
+      --max-model-len ${FLASH_NEXT_MAX_MODEL_LEN:-131072}
+      --tensor-parallel-size ${FLASH_NEXT_TP_SIZE:-2}
+      --kv-cache-dtype fp8
+      --max-num-seqs ${FLASH_NEXT_MAX_NUM_SEQS:-8}
+      --enable-prefix-caching
+      --host 0.0.0.0
+      --port 8000
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_xml
+      --reasoning-parser qwen3
+      --logprobs-mode raw_logprobs
+    volumes:
+      - ${HF_CACHE_DIR:-/root/.cache/huggingface}:/root/.cache/huggingface
+    networks:
+      vllm_default:
+        aliases:
+          - qwen
+          - ai_flash_next
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ============================================================================
+  # MODEL 2: Qwen3.6-35B-A3B (Fast LLM - Phản hồi siêu tốc, Active 3B MoE)
+  # Phân bổ: GPU 2 | TP=1 | VRAM ~96GB | Context 32K
+  # ============================================================================
+  ai_fast_llm:
+    image: vllm/vllm-openai:nightly
+    container_name: ai_fast_llm
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '16g'
+    ports:
+      - "${FAST_LLM_PORT:-8001}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - NVIDIA_VISIBLE_DEVICES=${FAST_LLM_GPU_DEVICES:-2}
+    command: >
+      --model ${FAST_LLM_MODEL_ID:-Qwen/Qwen3.6-35B-A3B}
+      --served-model-name ${FAST_LLM_MODEL_ID:-Qwen/Qwen3.6-35B-A3B} fast-model qwen36-fast
+      --gpu-memory-utilization ${FAST_LLM_GPU_MEMORY_UTILIZATION:-0.88}
+      --max-model-len ${FAST_LLM_MAX_MODEL_LEN:-32768}
+      --tensor-parallel-size ${FAST_LLM_TP_SIZE:-1}
+      --enable-prefix-caching
+      --host 0.0.0.0
+      --port 8000
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_xml
+      --reasoning-parser qwen3
+    volumes:
+      - ${HF_CACHE_DIR:-/root/.cache/huggingface}:/root/.cache/huggingface
+    networks:
+      vllm_default:
+        aliases:
+          - fast-llm
+          - ai_fast_llm
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ============================================================================
+  # MODEL 3: HunyuanOCR (Bóc tách OCR tài liệu, văn bản, bảng biểu)
+  # Phân bổ: GPU 3 | VRAM ~21GB | Context 8192
+  # ============================================================================
+  ai_hunyuan_ocr:
+    image: vllm-ocr:latest
+    container_name: ai_hunyuan_ocr
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '8g'
+    ports:
+      - "${OCR_PORT:-8002}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - NVIDIA_VISIBLE_DEVICES=${OCR_GPU_DEVICES:-3}
+    command: >
+      --model ${OCR_MODEL_ID:-tencent/HunyuanOCR}
+      --served-model-name ${OCR_MODEL_ID:-tencent/HunyuanOCR} hunyuan-ocr
+      --gpu-memory-utilization ${OCR_GPU_MEMORY_UTILIZATION:-0.22}
+      --max-model-len ${OCR_MAX_MODEL_LEN:-8192}
+      --tensor-parallel-size 1
+      --enforce-eager
+      --no-enable-prefix-caching
+      --mm-processor-cache-gb 0
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - ${HF_CACHE_DIR:-/root/.cache/huggingface}:/root/.cache/huggingface
+    networks:
+      vllm_default:
+        aliases:
+          - hunyuan-ocr
+          - ai_hunyuan_ocr
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ============================================================================
+  # MODEL 4: Qwen3-Embedding-4B (Vector Embedding ngữ nghĩa)
+  # Phân bổ: GPU 3 | VRAM ~17GB | Runner Pooling | Context 16K
+  # ============================================================================
+  ai_embedding:
+    image: vllm/vllm-openai:nightly
+    container_name: ai_embedding
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '8g'
+    ports:
+      - "${EMBEDDING_PORT:-8003}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - NVIDIA_VISIBLE_DEVICES=${EMBEDDING_GPU_DEVICES:-3}
+    command: >
+      --model ${EMBEDDING_MODEL_ID:-Qwen/Qwen3-Embedding-4B}
+      --served-model-name ${EMBEDDING_MODEL_ID:-Qwen/Qwen3-Embedding-4B} qwen3-embedding-4b
+      --runner pooling
+      --gpu-memory-utilization ${EMBEDDING_GPU_MEMORY_UTILIZATION:-0.18}
+      --max-model-len ${EMBEDDING_MAX_MODEL_LEN:-16384}
+      --tensor-parallel-size 1
+      --enforce-eager
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - ${HF_CACHE_DIR:-/root/.cache/huggingface}:/root/.cache/huggingface
+    networks:
+      vllm_default:
+        aliases:
+          - qwen-embedding
+          - ai_embedding
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ============================================================================
+  # MODEL 5: Qwen3-Reranker-4B (Tái xếp hạng kết quả tìm kiếm RAG)
+  # Phân bổ: GPU 3 | VRAM ~17GB | Runner Pooling / Score | Context 8K
+  # ============================================================================
+  ai_reranker:
+    image: vllm/vllm-openai:nightly
+    container_name: ai_reranker
+    runtime: nvidia
+    restart: unless-stopped
+    ipc: host
+    shm_size: '8g'
+    ports:
+      - "${RERANKER_PORT:-8004}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - NVIDIA_VISIBLE_DEVICES=${RERANKER_GPU_DEVICES:-3}
+    command: >
+      --model ${RERANKER_MODEL_ID:-Qwen/Qwen3-Reranker-4B}
+      --served-model-name ${RERANKER_MODEL_ID:-Qwen/Qwen3-Reranker-4B} qwen3-reranker-4b
+      --runner pooling
+      --gpu-memory-utilization ${RERANKER_GPU_MEMORY_UTILIZATION:-0.18}
+      --max-model-len ${RERANKER_MAX_MODEL_LEN:-8192}
+      --tensor-parallel-size 1
+      --enforce-eager
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - ${HF_CACHE_DIR:-/root/.cache/huggingface}:/root/.cache/huggingface
+    networks:
+      vllm_default:
+        aliases:
+          - bge-reranker
+          - ai_reranker
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ============================================================================
+  # LITELLM GATEWAY: Cổng thống nhất toàn bộ API AI suy luận
+  # ============================================================================
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: vllm-litellm
+    restart: unless-stopped
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml
+      - ./litellm_logger.py:/app/litellm_logger.py
+      - ./logs:/app/logs
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - AUDIT_LOG_FILE=/app/logs/audit.log
+    command: [ "--config", "/app/config.yaml", "--port", "4000", "--detailed_debug" ]
+    networks:
+      - vllm_default
+    depends_on:
+      - ai_flash_next
+      - ai_fast_llm
+
+  # ============================================================================
+  # MISSION CONTROL: vLLM Manager Web UI
+  # ============================================================================
+  manager:
+    build:
+      context: ./manager
+      dockerfile: Dockerfile
+    container_name: vllm-manager
+    restart: unless-stopped
+    ports:
+      - "${MANAGER_PORT:-8050}:8050"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/libexec/docker/cli-plugins:/usr/local/lib/docker/cli-plugins:ro
+      - ${HF_CACHE_DIR:-/root/.cache/huggingface}:/root/.cache/huggingface
+      - ./litellm_config.yaml:/app/litellm_config.yaml
+      - ./.env:/app/.env
+      - ./docker-compose.prod.yml:/app/docker-compose.yml
+      - ./manager/main.py:/app/main.py
+      - ./manager/static:/app/static
+      - ./logs:/app/logs
+    environment:
+      - VLLM_MANAGER_API_KEY=${VLLM_MANAGER_API_KEY}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - VLLM_API_BASE=http://ai_flash_next:8000
+      - LITELLM_API_BASE=http://vllm-litellm:4000
+      - MANAGER_PORT=${MANAGER_PORT:-8050}
+      - AUDIT_LOG_FILE=/app/logs/audit.log
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    networks:
+      - vllm_default
+    depends_on:
+      - ai_flash_next
+      - litellm
+
+  # ============================================================================
+  # MONITORING: Prometheus & Grafana
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: vllm-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9095}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - vllm_default
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: vllm-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3050}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/vllm-dashboard.json
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards/json:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - vllm_default
+    depends_on:
+      - prometheus
+
+networks:
+  vllm_default:
+
+volumes:
+  prometheus_data:
+  grafana_data:
