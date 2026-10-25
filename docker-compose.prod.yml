@@ -273,9 +273,9 @@ services:
       - TRANSFORMERS_OFFLINE=${HF_HUB_OFFLINE:-1}
       - NVIDIA_VISIBLE_DEVICES=${DECISION_GPU_DEVICES:-3}
     command: >
-      --model ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4}
-      --served-model-name ${DECISION_MODEL_ID:-mssfj/Qwen3.5-9B-GPTQ-INT4} Qwen/Qwen3.5-9B qwen-decision decision-qwen
-      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.15}
+      --model ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B}
+      --served-model-name ${DECISION_MODEL_ID:-Qwen/Qwen3.5-9B} qwen-decision decision-qwen
+      --gpu-memory-utilization ${DECISION_GPU_MEMORY_UTILIZATION:-0.25}
       --max-model-len ${DECISION_MAX_MODEL_LEN:-8192}
       --kv-cache-dtype fp8
       --enforce-eager

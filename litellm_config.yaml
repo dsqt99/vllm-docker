@@ -75,7 +75,7 @@ model_list:
     model_info:
       supports_decision: true
     litellm_params:
-      model: openai/mssfj/Qwen3.5-9B-GPTQ-INT4
+      model: openai/Qwen/Qwen3.5-9B
       api_base: http://decision-qwen:8000/v1
       api_key: EMPTY
       extra_body:
@@ -85,7 +85,17 @@ model_list:
     model_info:
       supports_decision: true
     litellm_params:
-      model: openai/mssfj/Qwen3.5-9B-GPTQ-INT4
+      model: openai/Qwen/Qwen3.5-9B
+      api_base: http://decision-qwen:8000/v1
+      api_key: EMPTY
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+  - model_name: Qwen/Qwen3.5-9B
+    model_info:
+      supports_decision: true
+    litellm_params:
+      model: openai/Qwen/Qwen3.5-9B
       api_base: http://decision-qwen:8000/v1
       api_key: EMPTY
       extra_body:
