@@ -1458,6 +1458,19 @@ async def api_test_chat(req: ChatTestRequest):
                                     "total_time_s": round(total_time, 2),
                                     "finish_reason": last_finish_reason
                                 }
+                                if target == "vllm":
+                                    record_audit_entry({
+                                        "id": str(time.time()).replace(".", "")[-8:],
+                                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                        "status": "success",
+                                        "status_code": 200,
+                                        "model": current_model,
+                                        "latency_ms": round(total_time * 1000, 1),
+                                        "usage": {"prompt_tokens": 0, "completion_tokens": token_count, "total_tokens": token_count},
+                                        "messages": payload["messages"],
+                                        "response": (accumulated_text[:1200] if "accumulated_text" in locals() and accumulated_text else None),
+                                        "error": None
+                                    })
                                 yield f"data: {json.dumps(meta)}\n\n"
                                 yield "data: [DONE]\n\n"
                                 break
@@ -1475,6 +1488,9 @@ async def api_test_chat(req: ChatTestRequest):
                                     payload_data = {}
                                     if text:
                                         payload_data["delta"] = text
+                                        if "accumulated_text" not in locals():
+                                            accumulated_text = ""
+                                        accumulated_text += text
                                     if reasoning:
                                         payload_data["reasoning"] = reasoning
                                     if payload_data:
@@ -1501,6 +1517,21 @@ async def api_test_chat(req: ChatTestRequest):
                 usage = data.get("usage", {})
                 completion_tokens = usage.get("completion_tokens", 0)
                 tps = round(completion_tokens / elapsed, 1) if elapsed > 0 else 0
+                if target == "vllm":
+                    resp_choices = data.get("choices", [])
+                    resp_text = resp_choices[0].get("message", {}).get("content", "") if resp_choices else ""
+                    record_audit_entry({
+                        "id": str(time.time()).replace(".", "")[-8:],
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "status": "success",
+                        "status_code": 200,
+                        "model": current_model,
+                        "latency_ms": round(elapsed * 1000, 1),
+                        "usage": usage,
+                        "messages": payload["messages"],
+                        "response": resp_text[:1200] if resp_text else None,
+                        "error": None
+                    })
                 return {
                     "response": data,
                     "metrics": {

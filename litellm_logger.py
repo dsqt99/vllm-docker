@@ -177,6 +177,10 @@ class AuditLogger(CustomLogger):
         except Exception as e:
             print(f"[AuditLogger Error] Trong async_log_success_event: {e}")
 
+    async def async_log_stream_event(self, kwargs, response_obj, start_time, end_time):
+        """Hỗ trợ ghi audit log cho các luồng streaming SSE (OpenWebUI, Chatbot, Smoke Test)."""
+        return await self.async_log_success_event(kwargs, response_obj, start_time, end_time)
+
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         try:
             latency_ms = round((end_time - start_time).total_seconds() * 1000, 1) if (start_time and end_time) else 0

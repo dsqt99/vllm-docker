@@ -62,11 +62,19 @@ cp patch_strategies.py "$EXPORT_DIR/config/" || true
 cp .env.example "$EXPORT_DIR/config/.env.example"
 cp -r monitoring "$EXPORT_DIR/config/"
 cp -r manager "$EXPORT_DIR/config/"
+mkdir -p "$EXPORT_DIR/config/logs"
+touch "$EXPORT_DIR/config/logs/audit.log"
+chmod -R 777 "$EXPORT_DIR/config/logs"
 
 # 4. Tạo script cài đặt tự động tại máy đích
 cat << 'EOF' > "$EXPORT_DIR/install.sh"
 #!/usr/bin/env bash
 set -e
+
+# Đảm bảo quyền ghi logs cho vLLM Manager & LiteLLM
+mkdir -p config/logs
+touch config/logs/audit.log
+chmod -R 777 config/logs
 
 echo "=================================================================="
 echo " TRIỂN KHAI CỤM vLLM MISSION CONTROL & GRAFANA MONITORING TỰ ĐỘNG"
