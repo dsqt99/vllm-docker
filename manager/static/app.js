@@ -1078,6 +1078,94 @@ async function refreshChatModels() {
   }
 }
 
+// Minimalist 2-way sync for Max Tokens (Slider + Inline Editable Number)
+function syncMaxTokens(val, source) {
+  let num = parseInt(val) || 8192;
+  const numInput = document.getElementById('paramMaxTokensInput');
+  const slider = document.getElementById('paramMaxTokens');
+
+  if (source === 'input') {
+    if (num < 64) num = 64;
+    if (num > 131072) num = 131072;
+    if (slider && num <= parseInt(slider.max || '32768')) {
+      slider.value = num;
+    }
+  } else {
+    if (numInput) numInput.value = num;
+  }
+}
+
+let isShowFullThinking = true;
+function handleToggleThinking(checked) {
+  isShowFullThinking = checked;
+  document.querySelectorAll('.chat-thinking-box').forEach(box => {
+    box.open = checked;
+  });
+}
+
+function parseThinkingContent(fullText, explicitReasoning) {
+  let thinking = explicitReasoning || '';
+  let content = fullText || '';
+
+  const thinkOpenIndex = content.indexOf('<think>');
+  if (thinkOpenIndex !== -1) {
+    const thinkCloseIndex = content.indexOf('</think>');
+    if (thinkCloseIndex !== -1) {
+      const extractedThink = content.substring(thinkOpenIndex + 7, thinkCloseIndex).trim();
+      thinking = thinking ? (thinking + '\n' + extractedThink) : extractedThink;
+      content = (content.substring(0, thinkOpenIndex) + content.substring(thinkCloseIndex + 8)).trim();
+    } else {
+      const inProgressThink = content.substring(thinkOpenIndex + 7);
+      thinking = thinking ? (thinking + '\n' + inProgressThink) : inProgressThink;
+      content = content.substring(0, thinkOpenIndex).trim();
+    }
+  }
+
+  return { thinking, content };
+}
+
+function updateAssistantBubble(bubble, accumulatedText, reasoningText, finishReason, maxTokens) {
+  const { thinking, content } = parseThinkingContent(accumulatedText, reasoningText);
+  let html = '';
+
+  if (thinking) {
+    const isOpen = isShowFullThinking ? 'open' : '';
+    html += `
+      <details class="chat-thinking-box" ${isOpen}>
+        <summary class="chat-thinking-summary">
+          <span>🧠 Quá trình suy nghĩ (Thinking)</span>
+        </summary>
+        <div class="chat-thinking-body">${escapeHtml(thinking)}</div>
+      </details>
+    `;
+  }
+
+  if (content) {
+    html += `<div class="chat-main-content">${escapeHtml(content)}</div>`;
+  } else if (!thinking) {
+    html += `<div class="chat-main-content"><span class="dot-pulse"></span> Đang chờ mô hình phản hồi...</div>`;
+  }
+
+  if (finishReason === 'length') {
+    html += `
+      <div class="token-limit-warning">
+        <span>⚠️ Đã đạt giới hạn Max Tokens (${maxTokens}). Nội dung có thể bị cắt ngang.</span>
+        <button type="button" class="continue-chat-btn" onclick="continueChatGeneration()">▶ Tiếp tục sinh (Continue)</button>
+      </div>
+    `;
+  }
+
+  bubble.innerHTML = html;
+}
+
+function continueChatGeneration() {
+  const input = document.getElementById('chatInput');
+  if (input) {
+    input.value = 'Tiếp tục hoàn thiện câu trả lời ở trên, không lặp lại phần đã viết.';
+    handleSendChat();
+  }
+}
+
 // Live Smoke Test Chat Stream
 async function handleSendChat() {
   const input = document.getElementById('chatInput');
@@ -1098,7 +1186,7 @@ async function handleSendChat() {
   // Add Assistant bubble placeholder
   const aiBubble = document.createElement('div');
   aiBubble.className = 'chat-bubble chat-assistant';
-  aiBubble.textContent = '...';
+  aiBubble.innerHTML = '<span class="dot-pulse"></span> Đang kết nối mô hình...';
   messagesDiv.appendChild(aiBubble);
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
@@ -1110,9 +1198,13 @@ async function handleSendChat() {
   const latencySpan = document.getElementById('metricLatency');
 
   const temp = parseFloat(document.getElementById('paramTemp')?.value || '0.7');
-  const maxTokens = parseInt(document.getElementById('paramMaxTokens')?.value || '512');
+  const maxTokens = parseInt(document.getElementById('paramMaxTokensInput')?.value || document.getElementById('paramMaxTokens')?.value || '8192');
   const target = document.getElementById('chatTargetSelect')?.value || 'vllm';
   const model = document.getElementById('chatModelSelect')?.value || undefined;
+
+  let finishReason = null;
+  let accumulated = '';
+  let accumulatedReasoning = '';
 
   try {
     const response = await fetch(API.testChat, {
@@ -1135,10 +1227,9 @@ async function handleSendChat() {
       return;
     }
 
-    aiBubble.textContent = '';
+    aiBubble.innerHTML = '';
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let accumulated = '';
 
     while (true) {
       const { value, done } = await reader.read();
@@ -1154,15 +1245,20 @@ async function handleSendChat() {
           try {
             const parsed = JSON.parse(raw);
             if (parsed.error) {
-              aiBubble.textContent += `\n[Lỗi: ${parsed.error}]`;
+              aiBubble.innerHTML += `<div class="text-rose text-xs" style="margin-top: 4px;">[Lỗi: ${escapeHtml(parsed.error)}]</div>`;
             } else if (parsed.meta) {
               if (ttftSpan) ttftSpan.textContent = `${parsed.ttft_ms} ms`;
               if (tpsSpan) tpsSpan.textContent = `${parsed.tokens_per_second} t/s`;
               if (tokensSpan) tokensSpan.textContent = `${parsed.total_tokens} tokens`;
               if (latencySpan) latencySpan.textContent = `${parsed.total_time_s} s`;
-            } else if (parsed.delta) {
-              accumulated += parsed.delta;
-              aiBubble.textContent = accumulated;
+              if (parsed.finish_reason) {
+                finishReason = parsed.finish_reason;
+                updateAssistantBubble(aiBubble, accumulated, accumulatedReasoning, finishReason, maxTokens);
+              }
+            } else {
+              if (parsed.delta) accumulated += parsed.delta;
+              if (parsed.reasoning) accumulatedReasoning += parsed.reasoning;
+              updateAssistantBubble(aiBubble, accumulated, accumulatedReasoning, finishReason, maxTokens);
               messagesDiv.scrollTop = messagesDiv.scrollHeight;
             }
           } catch (e) {
@@ -1172,7 +1268,8 @@ async function handleSendChat() {
       }
     }
 
-    state.chatHistory.push({ role: 'assistant', content: accumulated });
+    const { content: finalContent } = parseThinkingContent(accumulated, accumulatedReasoning);
+    state.chatHistory.push({ role: 'assistant', content: finalContent || accumulated });
   } catch (err) {
     aiBubble.textContent = `Lỗi kết nối: ${err.message}`;
   } finally {

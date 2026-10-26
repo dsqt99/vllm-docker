@@ -170,14 +170,14 @@ class DownloadModelRequest(BaseModel):
 
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(system|user|assistant)$")
-    content: str = Field(..., min_length=1, max_length=10000)
+    content: str = Field(..., min_length=1, max_length=500000)
 
 class ChatTestRequest(BaseModel):
     messages: List[ChatMessage]
     model: Optional[str] = None
     target: Optional[str] = Field("vllm", pattern="^(vllm|litellm)$")
     temperature: float = Field(0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(512, ge=16, le=4096)
+    max_tokens: int = Field(2048, ge=16, le=131072)
     stream: bool = True
 
 # Helper Functions
@@ -1440,6 +1440,7 @@ async def api_test_chat(req: ChatTestRequest):
                         yield f"data: {json.dumps({'error': f'HTTP {resp.status_code}: {err_str}', 'cause': err_info['cause']})}\n\n"
                         return
 
+                    last_finish_reason = None
                     async for line in resp.aiter_lines():
                         if not line:
                             continue
@@ -1454,7 +1455,8 @@ async def api_test_chat(req: ChatTestRequest):
                                     "ttft_ms": ttft_ms,
                                     "tokens_per_second": tps,
                                     "total_tokens": token_count,
-                                    "total_time_s": round(total_time, 2)
+                                    "total_time_s": round(total_time, 2),
+                                    "finish_reason": last_finish_reason
                                 }
                                 yield f"data: {json.dumps(meta)}\n\n"
                                 yield "data: [DONE]\n\n"
@@ -1462,13 +1464,24 @@ async def api_test_chat(req: ChatTestRequest):
 
                             try:
                                 chunk = json.loads(content_str)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                text = delta.get("content", "")
-                                if text:
-                                    if first_token_time is None:
-                                        first_token_time = time.time()
-                                    token_count += 1
-                                    yield f"data: {json.dumps({'delta': text})}\n\n"
+                                choices = chunk.get("choices", [])
+                                if choices:
+                                    choice = choices[0]
+                                    delta = choice.get("delta", {})
+                                    if choice.get("finish_reason"):
+                                        last_finish_reason = choice.get("finish_reason")
+                                    text = delta.get("content", "")
+                                    reasoning = delta.get("reasoning_content", "")
+                                    payload_data = {}
+                                    if text:
+                                        payload_data["delta"] = text
+                                    if reasoning:
+                                        payload_data["reasoning"] = reasoning
+                                    if payload_data:
+                                        if first_token_time is None:
+                                            first_token_time = time.time()
+                                        token_count += 1
+                                        yield f"data: {json.dumps(payload_data)}\n\n"
                             except Exception:
                                 yield f"{line}\n\n"
             except Exception as e:
